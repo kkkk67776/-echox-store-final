@@ -1,0 +1,6 @@
+{
+  "name": "ECHOX STORE",
+  "description": "منصة التجارة الإلكترونية التونسية الاحترافية للأجهزة والقطع الأصلية مع غرفة تحكم المالك ECHOX OWNER DASHBOARD",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

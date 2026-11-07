@@ -1,0 +1,63 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "Registered customer or store owner account",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique user UID" },
+        "email": { "type": "string", "format": "email", "description": "User email address" },
+        "fullName": { "type": "string", "maxLength": 100, "description": "Full legal name" },
+        "phone": { "type": "string", "maxLength": 20, "description": "Tunisian phone number in E.164" },
+        "role": { "type": "string", "enum": ["customer", "owner"], "description": "Account authorization role" },
+        "createdAt": { "type": "string", "description": "ISO timestamp of account creation" }
+      },
+      "required": ["id", "email", "role"]
+    },
+    "Order": {
+      "title": "Order",
+      "description": "Customer purchase order in Tunisian Dinars",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Order unique identifier" },
+        "trackingNumber": { "type": "string", "maxLength": 30, "description": "ECHOX shipment tracking number" },
+        "customerName": { "type": "string", "maxLength": 100, "description": "Customer recipient name" },
+        "customerPhone": { "type": "string", "maxLength": 20, "description": "Contact phone for delivery" },
+        "governorate": { "type": "string", "maxLength": 50, "description": "Tunisian governorate" },
+        "city": { "type": "string", "maxLength": 80, "description": "City or municipal area" },
+        "street": { "type": "string", "maxLength": 200, "description": "Delivery address details" },
+        "totalPrice": { "type": "number", "description": "Order total in TND" },
+        "status": { "type": "string", "enum": ["received", "confirmed", "processing", "shipped", "delivered", "cancelled"], "description": "Current order tracking status" },
+        "paymentMethod": { "type": "string", "enum": ["cod", "konnect", "flouci"], "description": "Payment gateway or cash on delivery" },
+        "createdAt": { "type": "string", "description": "Order placement timestamp" }
+      },
+      "required": ["id", "trackingNumber", "customerPhone", "totalPrice", "status"]
+    },
+    "SecurityAuditLog": {
+      "title": "SecurityAuditLog",
+      "description": "Sovereign owner authentication audit trail",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Owner Google UID" },
+        "event": { "type": "string", "description": "Security event identifier" },
+        "phone": { "type": "string", "description": "Sovereign phone number" },
+        "timestamp": { "type": "string", "description": "Event timestamp" }
+      },
+      "required": ["uid", "event"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Private user and owner profiles"
+    },
+    "/orders/{orderId}": {
+      "schema": { "$ref": "#/entities/Order" },
+      "description": "Tunisian customer orders"
+    },
+    "/security_audit_logs/{logId}": {
+      "schema": { "$ref": "#/entities/SecurityAuditLog" },
+      "description": "Security logs for owner authentication and access"
+    }
+  }
+}

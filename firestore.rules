@@ -1,0 +1,51 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    function isOwner() {
+      return request.auth != null && 
+        request.auth.token.email == 'abdelkaderbahri570@gmail.com' &&
+        request.auth.token.owner == true;
+    }
+
+    // 🔒 Security Challenges & Audit Logs: NEVER accessible directly from client
+    match /owner_otp_challenges/{challengeId} {
+      allow read, write: if false;
+    }
+
+    match /security_audit_logs/{logId} {
+      allow read: if isOwner();
+      allow write: if false; // Only Cloud Functions can write logs
+    }
+
+    // Products & Companies
+    match /products/{productId} {
+      allow read: if true;
+      allow write: if isOwner();
+    }
+
+    match /companies/{companyId} {
+      allow read: if true;
+      allow write: if isOwner();
+    }
+
+    // Orders
+    match /orders/{orderId} {
+      allow read: if isOwner() || (request.auth != null && resource.data.customerId == request.auth.uid);
+      allow create: if true; // Customers can submit new orders
+      allow update, delete: if isOwner();
+    }
+
+    // Customer Inquiries
+    match /inquiries/{inquiryId} {
+      allow create: if true;
+      allow read, update, delete: if isOwner();
+    }
+
+    // Site Settings
+    match /settings/{settingId} {
+      allow read: if true;
+      allow write: if isOwner();
+    }
+  }
+}
