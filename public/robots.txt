@@ -1,0 +1,7 @@
+User-agent: *
+Allow: /
+Disallow: /owner/
+Disallow: /account
+Disallow: /my_orders
+
+Sitemap: https://echox-store.netlify.app/sitemap.xml
