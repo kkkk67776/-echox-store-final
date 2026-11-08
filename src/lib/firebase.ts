@@ -12,20 +12,30 @@ declare global {
 
 import firebaseConfigJson from '../../firebase-applet-config.json';
 
-// Credentials loaded using the environment variables defined in .env or firebase-applet-config.json
-const rawDbId = import.meta.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID;
-const firestoreDatabaseId = 
-  (rawDbId && !rawDbId.startsWith('G-') && !rawDbId.startsWith('VITE_') && rawDbId.trim().length > 0)
-    ? rawDbId.trim()
-    : (firebaseConfigJson.firestoreDatabaseId || "ai-studio-echoxstore-9e1d54e8-7960-44b2-951a-524166c61a13");
+// Robust config helper to ignore placeholders like 'your_api_key'
+function getSafeConfig(envVal: string | undefined, jsonVal: string | undefined, hardcodedFallback: string): string {
+  if (envVal && !envVal.startsWith('your_') && !envVal.startsWith('MY_') && !envVal.startsWith('VITE_') && envVal.trim().length > 0) {
+    return envVal.trim();
+  }
+  if (jsonVal && !jsonVal.startsWith('your_') && !jsonVal.startsWith('MY_') && jsonVal.trim().length > 0) {
+    return jsonVal.trim();
+  }
+  return hardcodedFallback;
+}
+
+const firestoreDatabaseId = getSafeConfig(
+  import.meta.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID,
+  firebaseConfigJson.firestoreDatabaseId,
+  "ai-studio-echoxstore-9e1d54e8-7960-44b2-951a-524166c61a13"
+);
 
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || firebaseConfigJson.apiKey || "AIzaSyDoMctR2qL8S6_jU_xhiLxESDUX3edXFXg",
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || firebaseConfigJson.authDomain || "gen-lang-client-0499444627.firebaseapp.com",
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || firebaseConfigJson.projectId || "gen-lang-client-0499444627",
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || firebaseConfigJson.storageBucket || "gen-lang-client-0499444627.firebasestorage.app",
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || firebaseConfigJson.messagingSenderId || "977393142069",
-  appId: import.meta.env.VITE_FIREBASE_APP_ID || firebaseConfigJson.appId || "1:977393142069:web:9fc62b5cd1bbd0488f247c",
+  apiKey: getSafeConfig(import.meta.env.VITE_FIREBASE_API_KEY, firebaseConfigJson.apiKey, "AIzaSyDoMctR2qL8S6_jU_xhiLxESDUX3edXFXg"),
+  authDomain: getSafeConfig(import.meta.env.VITE_FIREBASE_AUTH_DOMAIN, firebaseConfigJson.authDomain, "gen-lang-client-0499444627.firebaseapp.com"),
+  projectId: getSafeConfig(import.meta.env.VITE_FIREBASE_PROJECT_ID, firebaseConfigJson.projectId, "gen-lang-client-0499444627"),
+  storageBucket: getSafeConfig(import.meta.env.VITE_FIREBASE_STORAGE_BUCKET, firebaseConfigJson.storageBucket, "gen-lang-client-0499444627.firebasestorage.app"),
+  messagingSenderId: getSafeConfig(import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID, firebaseConfigJson.messagingSenderId, "977393142069"),
+  appId: getSafeConfig(import.meta.env.VITE_FIREBASE_APP_ID, firebaseConfigJson.appId, "1:977393142069:web:9fc62b5cd1bbd0488f247c"),
 };
 
 console.log('[Firebase Init] Initializing Firebase with Project:', firebaseConfig.projectId, '| Database ID:', firestoreDatabaseId);

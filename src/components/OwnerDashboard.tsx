@@ -26,19 +26,22 @@ import {
   TrendingUp,
   Clock,
   Save,
-  Send
+  Send,
+  KeyRound
 } from 'lucide-react';
 import { Product, Company, Order, OrderStatus } from '../types';
 import { TUNISIAN_GOVERNORATES, getGovernorateName } from '../data/governorates';
 
 import { 
   getOwnerGoogleUser, 
-  getOwnerCustomClaims, 
-  checkServerSession, 
+  isOwnerUnlocked,
   clearOwnerSecuritySession, 
   logoutOwnerServer, 
   OWNER_EMAIL 
 } from '../lib/security';
+import { OwnerSecuritySettings } from './security/OwnerSecuritySettings';
+import PartnersManager from './PartnersManager';
+import OwnerDashboardMaster from './OwnerDashboardMaster';
 
 interface OwnerDashboardProps {
   onNavigate?: (route: string, state?: any) => void;
@@ -78,83 +81,8 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
     t 
   } = useStore();
 
-  useEffect(() => {
-    let cancelled = false;
-
-    async function guard() {
-      // 1) هل هناك مستخدم مسجل بحساب Google؟
-      const googleUser = getOwnerGoogleUser();
-      if (!googleUser) {
-        if (!cancelled) navigate('/owner/login');
-        return;
-      }
-
-      // 2) هل البريد هو المالك abdelkaderbahri570@gmail.com؟
-      if (googleUser.email !== OWNER_EMAIL) {
-        clearOwnerSecuritySession();
-        if (!cancelled) navigate('/owner/login');
-        return;
-      }
-
-      // 3) هل لديه Custom Claim owner:true؟ (لا يُمنح إلا بعد نجاح OTP)
-      const claims = getOwnerCustomClaims();
-      if (claims.owner !== true) {
-        if (!cancelled) navigate('/owner/phone');
-        return;
-      }
-
-      // 4) هل لديه جلسة cookie صالحة على الخادم (__session)؟
-      try {
-        const hasValidSession = await checkServerSession();
-        if (!hasValidSession) {
-          if (!cancelled) navigate('/owner/login');
-          return;
-        }
-      } catch {
-        if (!cancelled) navigate('/owner/login');
-        return;
-      }
-
-      // ✅ كل الشروط تحققت — اسمح بالعرض
-      if (!cancelled) {
-        setAuthorized(true);
-        setChecking(false);
-      }
-    }
-
-    guard();
-    return () => { cancelled = true; };
-  }, []);
-
-  // While checking authorization, display the mandatory security dark/gold screen
-  if (checking) {
-    return (
-      <div 
-        style={{ 
-          minHeight: '85vh', 
-          display: 'flex',
-          alignItems: 'center', 
-          justifyContent: 'center',
-          background: '#0A0A0B', 
-          color: '#D4AF37',
-          fontSize: '18px',
-          fontWeight: 'bold',
-          letterSpacing: '1px'
-        }}
-      >
-        <div className="flex flex-col items-center gap-3">
-          <div className="w-10 h-10 border-3 border-[#D4AF37] border-t-transparent rounded-full animate-spin" />
-          <span>جارٍ التحقق من الصلاحيات ونظام الأمان السيادي...</span>
-        </div>
-      </div>
-    );
-  }
-
-  if (!authorized) return null;
-
-  // 2. Authenticated Owner Control Room
   // Tab navigation
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'products' | 'companies' | 'orders' | 'support' | 'settings'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'products' | 'companies' | 'master' | 'orders' | 'support' | 'settings' | 'security'>('dashboard');
 
   // Products state
   const [prodSearch, setProdSearch] = useState('');
@@ -199,6 +127,61 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
   const [shippingFee, setShippingFee] = useState(siteSettings.standardShippingFee.toString());
   const [freeThreshold, setFreeThreshold] = useState(siteSettings.freeShippingThreshold.toString());
   const [settingsSavedMessage, setSettingsSavedMessage] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function guard() {
+      // 1) التحقق من تسجيل الدخول بحساب Google المعتمد
+      const googleUser = getOwnerGoogleUser();
+      if (!googleUser || googleUser.email.toLowerCase() !== OWNER_EMAIL.toLowerCase()) {
+        clearOwnerSecuritySession();
+        if (!cancelled) navigate('/owner/login');
+        return;
+      }
+
+      // 2) التحقق من فك قفل شاشة الهاتف (Pattern أو PIN)
+      if (!isOwnerUnlocked()) {
+        if (!cancelled) navigate('/owner/lock');
+        return;
+      }
+
+      // ✅ كل الشروط تحققت — اسمح بعرض لوحة التحكم
+      if (!cancelled) {
+        setAuthorized(true);
+        setChecking(false);
+      }
+    }
+
+    guard();
+    return () => { cancelled = true; };
+  }, []);
+
+  // While checking authorization, display the mandatory security dark/gold screen
+  if (checking) {
+    return (
+      <div 
+        style={{ 
+          minHeight: '85vh', 
+          display: 'flex',
+          alignItems: 'center', 
+          justifyContent: 'center',
+          background: '#0A0A0B', 
+          color: '#D4AF37',
+          fontSize: '18px',
+          fontWeight: 'bold',
+          letterSpacing: '1px'
+        }}
+      >
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-10 h-10 border-3 border-[#D4AF37] border-t-transparent rounded-full animate-spin" />
+          <span>جارٍ التحقق من الصلاحيات ونظام الأمان السيادي...</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (!authorized) return null;
 
   const handleLogout = async () => {
     await logoutOwnerServer();
@@ -394,7 +377,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
 
         <button
           onClick={handleLogout}
-          className="px-4 py-2.5 rounded-xl bg-white/10 hover:bg-red-600/80 text-white text-xs font-bold transition-colors flex items-center gap-2 shrink-0"
+          className="px-4 py-2.5 rounded-xl bg-white/10 hover:bg-red-600/80 text-white text-xs font-bold transition-colors flex items-center gap-2 shrink-0 cursor-pointer"
         >
           <LogOut className="w-4 h-4" />
           <span>{t.ownerSecurity.logout}</span>
@@ -430,7 +413,17 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
           }`}
         >
           <Building2 className="w-4 h-4" />
-          <span>{t.admin.companies} ({companies.length})</span>
+          <span>{t.admin.companies}</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('master')}
+          className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 shrink-0 ${
+            activeTab === 'master' ? 'bg-[#F59E0B] text-black shadow-lg shadow-[#F59E0B]/20' : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
+          }`}
+        >
+          <Package className="w-4 h-4 text-amber-500" />
+          <span>إدارة الشركات والمنتجات (Master)</span>
         </button>
 
         <button
@@ -461,6 +454,16 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
         >
           <Settings className="w-4 h-4" />
           <span>{t.admin.settings}</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('security')}
+          className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 shrink-0 ${
+            activeTab === 'security' ? 'bg-[#0B0F17] text-[#D4AF37] border-2 border-[#D4AF37] shadow-sm' : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
+          }`}
+        >
+          <ShieldCheck className="w-4 h-4 text-amber-500" />
+          <span>الأمان والخصوصية</span>
         </button>
       </div>
 
@@ -867,136 +870,12 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
 
       {/* TAB 3: COMPANIES MANAGEMENT */}
       {activeTab === 'companies' && (
-        <div className="space-y-4">
-          <div className="flex justify-between items-center bg-white p-4 rounded-2xl border border-slate-200">
-            <div>
-              <h2 className="text-sm font-bold text-slate-900">الشركات التونسية الشريكة والموزعون</h2>
-              <p className="text-xs text-slate-500">إدارة حسابات الشركات والمصانع المسجلة في منصة ECHOX</p>
-            </div>
-            <button
-              onClick={() => setShowAddCompModal(true)}
-              className="px-4 py-2 bg-[#FF6B00] hover:bg-[#e05e00] text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-xs"
-            >
-              <Plus className="w-4 h-4" />
-              <span>{t.admin.addCompany}</span>
-            </button>
-          </div>
+        <PartnersManager />
+      )}
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {companies.map(comp => {
-              const compProdsCount = products.filter(p => p.companyId === comp.id).length;
-              return (
-                <div key={comp.id} className="bg-white p-5 rounded-3xl border border-slate-200 space-y-3 shadow-xs">
-                  <div className="flex items-center gap-3">
-                    <img 
-                      src={comp.logo} 
-                      alt="logo" 
-                      className="w-12 h-12 rounded-xl object-contain bg-slate-50 p-1 border border-slate-200" 
-                    />
-                    <div>
-                      <h3 className="font-bold text-sm text-slate-900">{comp.name}</h3>
-                      <span className="text-[11px] text-slate-500">{getGovernorateName(comp.governorate, language)}</span>
-                    </div>
-                  </div>
-
-                  <p className="text-xs text-slate-600 line-clamp-2">{comp.description.ar}</p>
-
-                  <div className="pt-2 border-t border-slate-100 text-xs space-y-1 text-slate-600">
-                    <p><strong>الهاتف:</strong> <span dir="ltr">{comp.phone}</span></p>
-                    <p><strong>البريد:</strong> <span dir="ltr">{comp.email}</span></p>
-                    <p><strong>المنتجات التابعة:</strong> <span className="text-[#FF6B00] font-bold">{compProdsCount} منتجات</span></p>
-                  </div>
-
-                  <div className="pt-2 flex justify-end gap-2">
-                    <button
-                      onClick={() => {
-                        if (confirm(`هل أنت متأكد من حذف شركة ${comp.name}؟`)) {
-                          deleteCompany(comp.id);
-                        }
-                      }}
-                      className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg text-xs"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-
-          {/* Add Company Modal */}
-          {showAddCompModal && (
-            <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
-              <div className="bg-white rounded-3xl w-full max-w-lg p-6 space-y-4">
-                <div className="flex justify-between items-center border-b pb-3">
-                  <h3 className="text-base font-bold text-slate-900">{t.admin.addCompany}</h3>
-                  <button onClick={() => setShowAddCompModal(false)}>✕</button>
-                </div>
-
-                <form onSubmit={handleSaveCompany} className="space-y-3">
-                  <input
-                    type="text"
-                    required
-                    placeholder="اسم الشركة أو المصنع"
-                    value={compName}
-                    onChange={e => setCompName(e.target.value)}
-                    className="w-full text-xs py-2 px-3 rounded-xl border border-slate-300"
-                  />
-                  <input
-                    type="tel"
-                    required
-                    placeholder="رقم الهاتف التونسي"
-                    value={compPhone}
-                    onChange={e => setCompPhone(e.target.value)}
-                    className="w-full text-xs py-2 px-3 rounded-xl border border-slate-300"
-                    dir="ltr"
-                  />
-                  <input
-                    type="email"
-                    placeholder="البريد الإلكتروني"
-                    value={compEmail}
-                    onChange={e => setCompEmail(e.target.value)}
-                    className="w-full text-xs py-2 px-3 rounded-xl border border-slate-300"
-                    dir="ltr"
-                  />
-                  <select
-                    value={compGov}
-                    onChange={e => setCompGov(e.target.value)}
-                    className="w-full text-xs py-2 px-3 rounded-xl border border-slate-300 bg-white"
-                  >
-                    {TUNISIAN_GOVERNORATES.map(g => (
-                      <option key={g.id} value={g.id}>{g.nameAr}</option>
-                    ))}
-                  </select>
-                  <textarea
-                    rows={2}
-                    placeholder="نبذة عن الشركة ومجال تخصصها..."
-                    value={compDescAr}
-                    onChange={e => setCompDescAr(e.target.value)}
-                    className="w-full text-xs py-2 px-3 rounded-xl border border-slate-300"
-                  />
-
-                  <div className="flex justify-end gap-2 pt-2">
-                    <button
-                      type="button"
-                      onClick={() => setShowAddCompModal(false)}
-                      className="px-4 py-2 text-xs text-slate-600 hover:bg-slate-100 rounded-xl"
-                    >
-                      إلغاء
-                    </button>
-                    <button
-                      type="submit"
-                      className="px-5 py-2 bg-[#FF6B00] text-white text-xs font-bold rounded-xl"
-                    >
-                      حفظ الشركة
-                    </button>
-                  </div>
-                </form>
-              </div>
-            </div>
-          )}
-
-        </div>
+      {/* TAB MASTER: MASTER PARTNERS & PRODUCTS MANAGER */}
+      {activeTab === 'master' && (
+        <OwnerDashboardMaster />
       )}
 
       {/* TAB 4: ORDERS MANAGEMENT */}
@@ -1301,7 +1180,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
           <div className="flex justify-end pt-4">
             <button
               type="submit"
-              className="px-6 py-3 bg-[#FF6B00] hover:bg-[#e05e00] text-white font-bold text-xs rounded-xl shadow-md flex items-center gap-2"
+              className="px-6 py-3 bg-[#FF6B00] hover:bg-[#e05e00] text-white font-bold text-xs rounded-xl shadow-md flex items-center gap-2 cursor-pointer"
             >
               <Save className="w-4 h-4" />
               <span>{t.admin.saveChanges}</span>
@@ -1309,6 +1188,11 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
           </div>
 
         </form>
+      )}
+
+      {/* TAB 7: SOVEREIGN SECURITY & PRIVACY (PHONE OS LOCK SETTINGS) */}
+      {activeTab === 'security' && (
+        <OwnerSecuritySettings onNavigate={navigate} />
       )}
 
     </div>

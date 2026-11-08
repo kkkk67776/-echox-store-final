@@ -1,51 +1,147 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    
-    function isOwner() {
-      return request.auth != null && 
-        request.auth.token.email == 'abdelkaderbahri570@gmail.com' &&
-        request.auth.token.owner == true;
+
+    // ===============================================================
+    // PILLAR 1: THE MASTER GATE & ZERO TRUST DEFAULT DENY
+    // ===============================================================
+    match /{document=**} {
+      allow read, write: if false;
     }
 
-    // 🔒 Security Challenges & Audit Logs: NEVER accessible directly from client
+    // ===============================================================
+    // CORE AUTHENTICATION & IDENTITY HELPERS
+    // ===============================================================
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner() {
+      return isSignedIn() && 
+        request.auth.token.email == 'abdelkaderbahri570@gmail.com';
+    }
+
+    // Path Variable Hardening (Anti ID Poisoning)
+    function isValidId(id) {
+      return id is string && 
+        id.size() >= 1 && 
+        id.size() <= 128 && 
+        id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // ===============================================================
+    // PILLAR 2: VALIDATION BLUEPRINTS (ANTI-UPDATE-GAP)
+    // ===============================================================
+    function isValidOrder(data) {
+      return data.keys().hasAll(['id', 'trackingNumber', 'customerPhone', 'totalPrice', 'status']) &&
+        data.id is string && isValidId(data.id) &&
+        data.trackingNumber is string && data.trackingNumber.size() >= 3 && data.trackingNumber.size() <= 64 &&
+        data.customerPhone is string && data.customerPhone.size() >= 6 && data.customerPhone.size() <= 25 &&
+        data.totalPrice is number && data.totalPrice >= 0 &&
+        data.status in ['received', 'confirmed', 'processing', 'shipped', 'delivered', 'cancelled'] &&
+        (!('customerName' in data) || (data.customerName is string && data.customerName.size() <= 120)) &&
+        (!('governorate' in data) || (data.governorate is string && data.governorate.size() <= 60)) &&
+        (!('city' in data) || (data.city is string && data.city.size() <= 100)) &&
+        (!('street' in data) || (data.street is string && data.street.size() <= 300)) &&
+        (!('paymentMethod' in data) || data.paymentMethod in ['cod', 'konnect', 'flouci', 'online']) &&
+        (!('customerId' in data) || (data.customerId is string && data.customerId.size() <= 128)) &&
+        (!('items' in data) || (data.items is list && data.items.size() <= 50));
+    }
+
+    function isValidInquiry(data) {
+      return data.keys().hasAll(['name', 'phone', 'message']) &&
+        data.name is string && data.name.size() >= 2 && data.name.size() <= 120 &&
+        data.phone is string && data.phone.size() >= 6 && data.phone.size() <= 25 &&
+        data.message is string && data.message.size() >= 3 && data.message.size() <= 2000;
+    }
+
+    function isValidProduct(data) {
+      return data.keys().hasAll(['title', 'price']) &&
+        data.title is string && data.title.size() >= 2 && data.title.size() <= 200 &&
+        data.price is number && data.price >= 0;
+    }
+
+    function isValidCompany(data) {
+      return data.keys().hasAll(['name']) &&
+        data.name is string && data.name.size() >= 2 && data.name.size() <= 150;
+    }
+
+    // ===============================================================
+    // RESOURCE ACCESS CONTROL MATRIX
+    // ===============================================================
+
+    // 🔒 Sovereign Owner Security & OTP Challenges: Strictly inaccessible from Client SDKs
     match /owner_otp_challenges/{challengeId} {
       allow read, write: if false;
     }
 
+    // 🔒 Security Audit Trail: Read-only for Sovereign Owner, write strictly via secure backend
     match /security_audit_logs/{logId} {
-      allow read: if isOwner();
-      allow write: if false; // Only Cloud Functions can write logs
+      allow get, list: if isOwner();
+      allow write: if false;
     }
 
-    // Products & Companies
+    // 📦 Products Catalog: Publicly readable, writeable only by Sovereign Owner
     match /products/{productId} {
-      allow read: if true;
-      allow write: if isOwner();
+      allow get, list: if true;
+      allow create: if isValidId(productId) && isOwner() && isValidProduct(incoming());
+      allow update: if isValidId(productId) && isOwner() && isValidProduct(incoming());
+      allow delete: if isValidId(productId) && isOwner();
     }
 
+    // 🏢 Partner Companies & Vendors: Publicly readable, writeable only by Sovereign Owner
     match /companies/{companyId} {
-      allow read: if true;
-      allow write: if isOwner();
+      allow get, list: if true;
+      allow create: if isValidId(companyId) && isOwner() && isValidCompany(incoming());
+      allow update: if isValidId(companyId) && isOwner() && isValidCompany(incoming());
+      allow delete: if isValidId(companyId) && isOwner();
     }
 
-    // Orders
+    // 🛒 Orders: Customer submission with schema validation, owner administration
     match /orders/{orderId} {
-      allow read: if isOwner() || (request.auth != null && resource.data.customerId == request.auth.uid);
-      allow create: if true; // Customers can submit new orders
-      allow update, delete: if isOwner();
+      allow get: if isValidId(orderId) && (
+        isOwner() || 
+        (isSignedIn() && resource.data.customerId == request.auth.uid)
+      );
+      allow list: if isOwner() || (isSignedIn() && resource.data.customerId == request.auth.uid);
+      allow create: if isValidId(orderId) && isValidOrder(incoming());
+      allow update, delete: if isValidId(orderId) && isOwner();
     }
 
-    // Customer Inquiries
+    // 💬 Customer Inquiries & Contact Messages
     match /inquiries/{inquiryId} {
-      allow create: if true;
-      allow read, update, delete: if isOwner();
+      allow create: if isValidId(inquiryId) && isValidInquiry(incoming());
+      allow get, list, update, delete: if isValidId(inquiryId) && isOwner();
     }
 
-    // Site Settings
+    // ⚙️ Store Settings & Dynamic Configuration
     match /settings/{settingId} {
-      allow read: if true;
-      allow write: if isOwner();
+      allow get, list: if true;
+      allow write: if isValidId(settingId) && isOwner();
+    }
+
+    // 🔐 Sovereign Owner Security & Lock Screen Settings
+    match /store_settings/{settingId} {
+      allow get, list: if true;
+      allow write: if isValidId(settingId) && (
+        isOwner() || 
+        (isSignedIn() && request.auth.token.email == 'abdelkaderbahri570@gmail.com')
+      );
+    }
+
+    // 👤 User Profiles: Split PII Protection
+    match /users/{userId} {
+      allow get: if isValidId(userId) && (isOwner() || (isSignedIn() && request.auth.uid == userId));
+      allow list: if isOwner();
+      allow write: if isValidId(userId) && (isOwner() || (isSignedIn() && request.auth.uid == userId));
     }
   }
 }

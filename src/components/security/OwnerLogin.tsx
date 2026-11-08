@@ -39,48 +39,53 @@ export const OwnerLogin: React.FC<OwnerLoginProps> = ({ onNavigate }) => {
       uid: 'sovereign_owner_uid_570'
     });
 
-    // 3. MANDATORY SECURITY PROTOCOL: Redirect to Stage 2 (Phone verification)
-    // NEVER redirect directly to dashboard!
+    // 2. Authorized Google Account accepted
+    setOwnerGoogleUser({
+      email: OWNER_EMAIL,
+      uid: 'sovereign_owner_uid_570'
+    });
+
+    // 3. Direct transition to Phone OS Lock Screen (Pattern or PIN)
     setTimeout(() => {
       setLoading(false);
-      onNavigate('/owner/phone');
-    }, 500);
+      onNavigate('/owner/lock');
+    }, 400);
   };
 
   return (
-    <div className="min-h-[80vh] flex items-center justify-center px-4 py-12">
-      <div className="w-full max-w-lg bg-white rounded-3xl border-2 border-slate-900 shadow-2xl p-6 sm:p-10 space-y-6">
+    <div className="min-h-[85vh] flex items-center justify-center px-4 py-12 bg-black text-white selection:bg-amber-500 selection:text-black">
+      <div className="w-full max-w-md bg-zinc-950 rounded-[36px] border border-zinc-800 shadow-[0_0_50px_rgba(0,0,0,0.8),0_0_20px_rgba(245,158,11,0.1)] p-6 sm:p-10 space-y-6">
         
         {/* Header */}
         <div className="text-center space-y-3">
-          <div className="w-16 h-16 rounded-2xl bg-[#0B0F17] text-[#FF6B00] flex items-center justify-center mx-auto shadow-md">
+          <div className="w-16 h-16 rounded-2xl bg-white/[0.05] border border-white/10 text-amber-400 flex items-center justify-center mx-auto shadow-md">
             <ShieldCheck className="w-9 h-9" />
           </div>
           <div>
-            <span className="text-[11px] font-black uppercase tracking-widest text-[#FF6B00] bg-[#FF6B00]/10 px-3.5 py-1 rounded-full">
-              المرحلة 1 من 3 — التحقق من هوية المالك
+            <span className="text-[11px] font-black uppercase tracking-widest text-amber-400 bg-amber-500/10 px-3.5 py-1 rounded-full border border-amber-500/20">
+              تسجيل دخول المالك السيادي
             </span>
-            <h1 className="text-2xl font-black text-slate-900 mt-2">
-              ECHOX OWNER SECURITY
+            <h1 className="text-2xl font-black text-white mt-2">
+              ECHOX OWNER SYSTEM
             </h1>
-            <p className="text-xs text-slate-500 mt-1">
-              تسجيل الدخول الإلزامي بحساب Google السيادي المعتمد
+            <p className="text-xs text-zinc-400 mt-1">
+              المصادقة الرسمية بحساب Google المعتمد قبل شاشة قفل الهاتف
             </p>
           </div>
         </div>
 
         {/* Authorized Credentials Notice */}
-        <div className="p-4 rounded-2xl bg-[#FAF8F5] border border-[#E8E4DD] space-y-2 text-xs">
+        <div className="p-4 rounded-2xl bg-white/[0.03] border border-white/10 space-y-2 text-xs">
           <div className="flex justify-between items-center">
-            <span className="text-slate-500 font-semibold">حساب Google المصرح:</span>
-            <span className="font-mono font-black text-slate-900 bg-white px-2 py-0.5 rounded-md border border-slate-200" dir="ltr">
+            <span className="text-zinc-400 font-medium">حساب Google المصرح:</span>
+            <span className="font-mono font-bold text-amber-400 bg-white/[0.05] px-2 py-0.5 rounded-md border border-white/10" dir="ltr">
               abdelkaderbahri570@gmail.com
             </span>
           </div>
           <div className="flex justify-between items-center">
-            <span className="text-slate-500 font-semibold">الحماية المطبقة:</span>
-            <span className="text-[#FF6B00] font-bold">
-              Google Auth + SMS OTP + Server Session Cookie
+            <span className="text-zinc-400 font-medium">مستوى الحماية:</span>
+            <span className="text-emerald-400 font-bold">
+              Google Auth + OS Phone Lock (Pattern/PIN)
             </span>
           </div>
         </div>
@@ -88,7 +93,7 @@ export const OwnerLogin: React.FC<OwnerLoginProps> = ({ onNavigate }) => {
         {/* Form */}
         <form onSubmit={handleGoogleSignIn} className="space-y-4">
           <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1">
+            <label className="block text-xs font-bold text-zinc-300 mb-1">
               أدخل حساب Google المالك:
             </label>
             <input
@@ -97,14 +102,14 @@ export const OwnerLogin: React.FC<OwnerLoginProps> = ({ onNavigate }) => {
               value={emailInput}
               onChange={e => setEmailInput(e.target.value)}
               placeholder="abdelkaderbahri570@gmail.com"
-              className="w-full text-xs py-3 px-4 rounded-xl border-2 border-slate-300 focus:outline-hidden focus:border-[#FF6B00] font-mono text-center font-bold"
+              className="w-full text-xs py-3.5 px-4 rounded-xl bg-zinc-900 border border-zinc-700 text-white placeholder-zinc-500 focus:outline-hidden focus:border-amber-500 font-mono text-center font-bold"
               dir="ltr"
             />
           </div>
 
           {error && (
-            <div className="p-3.5 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs font-bold flex items-start gap-2">
-              <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-red-600" />
+            <div className="p-3.5 rounded-xl bg-red-950/60 border border-red-500/40 text-red-300 text-xs font-bold flex items-start gap-2">
+              <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-red-400" />
               <span>{error}</span>
             </div>
           )}
@@ -112,19 +117,19 @@ export const OwnerLogin: React.FC<OwnerLoginProps> = ({ onNavigate }) => {
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-3.5 rounded-xl bg-[#0B0F17] hover:bg-[#FF6B00] text-white font-bold text-xs shadow-md transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+            className="w-full py-3.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-black font-black text-xs shadow-lg transition-all flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"
           >
-            <Lock className="w-4 h-4 text-[#FF6B00]" />
-            <span>{loading ? 'جارٍ التحقق من الحساب...' : 'تسجيل الدخول بحساب Google المالك'}</span>
+            <Lock className="w-4 h-4 text-black" />
+            <span>{loading ? 'جارٍ التحقق من الحساب...' : 'المتابعة إلى شاشة قفل الهاتف'}</span>
           </button>
         </form>
 
         {/* Quick Helper Button */}
-        <div className="text-center pt-1 border-t border-slate-100">
+        <div className="text-center pt-2 border-t border-zinc-800">
           <button
             type="button"
             onClick={() => setEmailInput(OWNER_EMAIL)}
-            className="text-xs text-[#FF6B00] hover:underline font-semibold"
+            className="text-xs text-amber-400/90 hover:text-amber-300 hover:underline font-semibold cursor-pointer"
           >
             (انقر هنا لتعبئة حساب المالك المعتمد: abdelkaderbahri570@gmail.com)
           </button>
@@ -135,7 +140,7 @@ export const OwnerLogin: React.FC<OwnerLoginProps> = ({ onNavigate }) => {
           <button
             type="button"
             onClick={() => onNavigate('/')}
-            className="text-xs text-slate-400 hover:text-slate-700 flex items-center justify-center gap-1 mx-auto"
+            className="text-xs text-zinc-500 hover:text-zinc-300 flex items-center justify-center gap-1 mx-auto cursor-pointer"
           >
             <ArrowLeft className="w-3.5 h-3.5" />
             <span>العودة إلى واجهة المتجر</span>

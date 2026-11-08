@@ -44,6 +44,19 @@
         "timestamp": { "type": "string", "description": "Event timestamp" }
       },
       "required": ["uid", "event"]
+    },
+    "OwnerSecurity": {
+      "title": "OwnerSecurity",
+      "description": "Sovereign owner phone OS-level lock configuration (pattern or PIN)",
+      "type": "object",
+      "properties": {
+        "lock_type": { "type": "string", "enum": ["pattern", "pin"], "description": "Lock mechanism type" },
+        "lock_hash": { "type": "string", "description": "SHA-256 cryptographic hash of the pattern or PIN" },
+        "code_hash": { "type": "string", "description": "Secondary alias for SHA-256 hash" },
+        "failed_attempts": { "type": "array", "description": "Timestamps of recent failed unlock attempts" },
+        "updated_at": { "type": "string", "description": "Last configuration update ISO timestamp" }
+      },
+      "required": ["lock_type", "lock_hash"]
     }
   },
   "firestore": {
@@ -58,6 +71,10 @@
     "/security_audit_logs/{logId}": {
       "schema": { "$ref": "#/entities/SecurityAuditLog" },
       "description": "Security logs for owner authentication and access"
+    },
+    "/store_settings/{settingId}": {
+      "schema": { "$ref": "#/entities/OwnerSecurity" },
+      "description": "Store configuration including owner OS-level security lock"
     }
   }
 }

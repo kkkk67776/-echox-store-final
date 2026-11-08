@@ -14,8 +14,8 @@ import { OrderTrackingView } from './components/OrderTrackingView';
 import { CustomerPortal } from './components/CustomerPortal';
 import { OwnerDashboard } from './components/OwnerDashboard';
 import { OwnerLogin } from './components/security/OwnerLogin';
-import { OwnerPhone } from './components/security/OwnerPhone';
-import { OwnerOtp } from './components/security/OwnerOtp';
+import { OwnerLockScreen } from './components/security/OwnerLockScreen';
+import OwnerSecurityRoom from './components/security/OwnerSecurityRoom';
 import { PromiseView, CompaniesView, ContactView } from './components/StaticPages';
 import { FloatingActions } from './components/FloatingActions';
 import { Footer } from './components/Footer';
@@ -29,7 +29,12 @@ const AppContent: React.FC = () => {
   useEffect(() => {
     const syncRouteFromUrl = () => {
       const path = window.location.pathname;
-      if (path === '/owner/login' || path === '/owner/phone' || path === '/owner/otp' || path === '/owner/dashboard') {
+      if (
+        path === '/owner/login' || 
+        path === '/owner/lock' || 
+        path === '/owner/security-code' || 
+        path === '/owner/dashboard'
+      ) {
         setCurrentView(path);
       } else if (path === '/promise') {
         setCurrentView('promise');
@@ -65,8 +70,8 @@ const AppContent: React.FC = () => {
   // Determine current active view:
   const isOwnerRoute = 
     currentView === '/owner/login' || 
-    currentView === '/owner/phone' || 
-    currentView === '/owner/otp' || 
+    currentView === '/owner/lock' || 
+    currentView === '/owner/security-code' || 
     currentView === '/owner/dashboard' || 
     currentView === 'owner_dashboard';
 
@@ -77,19 +82,13 @@ const AppContent: React.FC = () => {
 
       {/* 2. Main View Router */}
       <main className="flex-1">
-        {/* Sovereign Security Multi-Stage Flow */}
+        {/* Sovereign Security & OS Lock Screen Flow */}
         {currentView === '/owner/login' && (
           <OwnerLogin onNavigate={handleNavigate} />
         )}
-        
-        {currentView === '/owner/phone' && (
-          <OwnerPhone onNavigate={handleNavigate} />
-        )}
 
-        {currentView === '/owner/otp' && (
-          <OwnerOtp 
-            onNavigate={handleNavigate} 
-          />
+        {(currentView === '/owner/lock' || currentView === '/owner/security-code') && (
+          <OwnerLockScreen onNavigate={handleNavigate} />
         )}
 
         {(currentView === '/owner/dashboard' || currentView === 'owner_dashboard') && (
@@ -113,6 +112,10 @@ const AppContent: React.FC = () => {
       <ProductDetailModal />
       <CartDrawer onOpenCheckout={() => setIsCheckoutOpen(true)} />
       <CheckoutModal isOpen={isCheckoutOpen} onClose={() => setIsCheckoutOpen(false)} />
+      <OwnerSecurityRoom 
+        onUnlockSuccess={() => handleNavigate('/owner/dashboard')} 
+        onNavigate={handleNavigate} 
+      />
       
       {/* 4. Floating Communication Buttons */}
       <FloatingActions />
