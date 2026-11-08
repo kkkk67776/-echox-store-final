@@ -1,0 +1,27 @@
+[build]
+  command = "bun run build"
+  publish = "dist"
+
+# Single-page app fallback so direct links like /owner/login, /promise, /contact work
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+# Security headers for every response
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Strict-Transport-Security = "max-age=63072000; includeSubDomains; preload"
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    Permissions-Policy = "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+    Cross-Origin-Opener-Policy = "same-origin-allow-popups"
+    X-XSS-Protection = "0"
+
+# Keep private owner pages out of search results
+[[headers]]
+  for = "/owner/*"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"

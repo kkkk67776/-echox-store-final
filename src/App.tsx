@@ -19,6 +19,7 @@ import OwnerSecurityRoom from './components/security/OwnerSecurityRoom';
 import { PromiseView, CompaniesView, ContactView } from './components/StaticPages';
 import { FloatingActions } from './components/FloatingActions';
 import { Footer } from './components/Footer';
+import { applySeo } from './lib/seo';
 
 const AppContent: React.FC = () => {
   const { currentView, setCurrentView } = useStore();
@@ -53,6 +54,11 @@ const AppContent: React.FC = () => {
     window.addEventListener('popstate', syncRouteFromUrl);
     return () => window.removeEventListener('popstate', syncRouteFromUrl);
   }, [setCurrentView]);
+
+  // Keep title, description, canonical and robots tags in sync with the current page
+  useEffect(() => {
+    applySeo(currentView);
+  }, [currentView]);
 
   const handleNavigate = (route: string, state?: any) => {
     if (state) {
