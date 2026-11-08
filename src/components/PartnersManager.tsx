@@ -2,14 +2,31 @@ import React, { useState, useEffect } from 'react';
 import { Building2, Plus, Trash2, Phone, Mail, Image as ImageIcon, CheckCircle, X, AlertTriangle } from 'lucide-react';
 
 export interface Partner {
-  id: number;
-  name: string;
+  id: number | string;
+  name: any;
   phone: string;
   email: string;
-  location: string;
-  description: string;
+  location: any;
+  description: any;
   logo: string;
 }
+
+const renderLocalized = (val: any, preferredLang: string = 'ar'): string => {
+  if (val === null || val === undefined) return '';
+  if (typeof val === 'string') return val;
+  if (typeof val === 'number') return String(val);
+  if (typeof val === 'boolean') return '';
+  if (typeof val === 'object') {
+    if (val[preferredLang]) return String(val[preferredLang]);
+    if (val.ar) return String(val.ar);
+    if (val.fr) return String(val.fr);
+    if (val.en) return String(val.en);
+    const firstVal = Object.values(val)[0];
+    if (typeof firstVal === 'string') return firstVal;
+    return '';
+  }
+  return String(val);
+};
 
 export default function PartnersManager() {
   const [partners, setPartners] = useState<Partner[]>([]);
@@ -143,19 +160,21 @@ export default function PartnersManager() {
               <div className="flex items-start gap-3.5">
                 <div className="w-12 h-12 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center shrink-0 overflow-hidden">
                   {partner.logo ? (
-                    <img src={partner.logo} alt={partner.name} className="w-full h-full object-cover" />
+                    <img src={partner.logo} alt={renderLocalized(partner.name)} className="w-full h-full object-cover" />
                   ) : (
                     <Building2 className="w-6 h-6 text-[#F59E0B]" />
                   )}
                 </div>
                 <div>
                   <h3 className="font-bold text-sm text-white flex items-center gap-2 flex-wrap">
-                    {partner.name}
-                    <span className="text-[10px] bg-[#F59E0B]/10 text-[#F59E0B] px-2 py-0.5 rounded-full border border-[#F59E0B]/20 font-medium">
-                      {partner.location}
-                    </span>
+                    {renderLocalized(partner.name)}
+                    {partner.location && (
+                      <span className="text-[10px] bg-[#F59E0B]/10 text-[#F59E0B] px-2 py-0.5 rounded-full border border-[#F59E0B]/20 font-medium">
+                        {renderLocalized(partner.location)}
+                      </span>
+                    )}
                   </h3>
-                  <p className="text-xs text-gray-400 mt-1">{partner.description || 'لا توجد نبذة تعريفية.'}</p>
+                  <p className="text-xs text-gray-400 mt-1">{renderLocalized(partner.description) || 'لا توجد نبذة تعريفية.'}</p>
                   
                   <div className="flex flex-wrap items-center gap-4 text-xs text-gray-400 mt-3">
                     <span className="flex items-center gap-1 font-mono text-gray-300">
@@ -197,7 +216,7 @@ export default function PartnersManager() {
 
             <h3 className="text-base font-bold mb-2">تأكيد الحذف النهائي</h3>
             <p className="text-xs text-gray-400 mb-6 leading-relaxed">
-              هل أنت متأكد من رغبتك في مسح شركة <span className="text-white font-bold">"{partnerToDelete?.name}"</span> نهائياً من البرنامج؟ لن تتمكن من استرجاعها وسيتم تخفيف الحمل عن النظام.
+              هل أنت متأكد من رغبتك في مسح شركة <span className="text-white font-bold">"{renderLocalized(partnerToDelete?.name)}"</span> نهائياً من البرنامج؟ لن تتمكن من استرجاعها وسيتم تخفيف الحمل عن النظام.
             </p>
 
             <div className="flex items-center gap-3">

@@ -4,42 +4,59 @@ import {
   Plus, 
   Trash2, 
   Phone, 
-  MapPin, 
   Image as ImageIcon, 
   CheckCircle, 
   X, 
   AlertTriangle, 
-  Package, 
-  Sparkles
+  Package
 } from 'lucide-react';
 
 export interface MasterPartner {
-  id: number;
-  name: string;
+  id: number | string;
+  name: any;
   phone: string;
   email?: string;
-  location?: string;
-  description?: string;
+  location?: any;
+  description?: any;
   logo?: string;
 }
 
 export interface MasterProduct {
-  id: number;
-  name: string;
-  price: string;
-  stock: string;
-  status: string;
+  id: number | string;
+  name: any;
+  price: any;
+  stock: any;
+  status?: string;
   image?: string;
+  images?: string[];
 }
 
 interface DeleteTarget {
   type: 'partner' | 'product';
   item: {
-    id: number;
-    name: string;
+    id: number | string;
+    name: any;
     [key: string]: any;
   };
 }
+
+// دالة أمان لمنع أخطاء React عند تمرير كائنات مترجمة {ar, fr, en}
+const renderLocalized = (val: any, preferredLang: string = 'ar'): string => {
+  if (val === null || val === undefined) return '';
+  if (typeof val === 'string') return val;
+  if (typeof val === 'number') return String(val);
+  if (typeof val === 'boolean') return '';
+  if (typeof val === 'object') {
+    if (val[preferredLang]) return String(val[preferredLang]);
+    if (val.ar) return String(val.ar);
+    if (val.fr) return String(val.fr);
+    if (val.en) return String(val.en);
+    const firstVal = Object.values(val)[0];
+    if (typeof firstVal === 'string') return firstVal;
+    return '';
+  }
+  return String(val);
+};
 
 export default function OwnerDashboardMaster() {
   const [activeTab, setActiveTab] = useState<'partners' | 'products'>('partners');
@@ -268,10 +285,10 @@ export default function OwnerDashboardMaster() {
                   </div>
                   <div>
                     <h3 className="font-bold text-sm text-white flex items-center gap-2">
-                      {partner.name}
+                      {renderLocalized(partner.name)}
                       {partner.location && (
                         <span className="text-[10px] bg-[#F59E0B]/10 text-[#F59E0B] px-2 py-0.5 rounded-full border border-[#F59E0B]/20">
-                          {partner.location}
+                          {renderLocalized(partner.location)}
                         </span>
                       )}
                     </h3>
@@ -311,38 +328,44 @@ export default function OwnerDashboardMaster() {
               <p>لا توجد منتجات مسجلة.</p>
             </div>
           ) : (
-            products.map((product) => (
-              <div 
-                key={product.id} 
-                className="bg-white/[0.03] border border-white/10 p-4 sm:p-5 rounded-2xl flex items-center justify-between gap-4 transition hover:border-[#F59E0B]/40"
-              >
-                <div className="flex items-center gap-3.5">
-                  <div className="w-12 h-12 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center shrink-0 overflow-hidden">
-                    {product.image ? (
-                      <img src={product.image} alt="" className="w-full h-full object-cover" />
-                    ) : (
-                      <Package className="w-6 h-6 text-[#F59E0B]" />
-                    )}
-                  </div>
-                  <div>
-                    <h3 className="font-bold text-sm text-white">{product.name}</h3>
-                    <p className="text-xs text-[#F59E0B] font-bold mt-1">
-                      {product.price} د.ت <span className="text-gray-400 font-normal">| المخزون: {product.stock}</span>
-                    </p>
-                  </div>
-                </div>
+            products.map((product) => {
+              const prodImg = product.image || (product.images && product.images[0]) || '';
+              const prodPriceDisplay = typeof product.price === 'number' ? product.price.toFixed(3) : renderLocalized(product.price);
+              const prodStockDisplay = typeof product.stock === 'number' ? `${product.stock} قطع` : renderLocalized(product.stock);
 
-                {/* زر الحذف النهائي */}
-                <button
-                  type="button"
-                  onClick={() => promptDelete('product', product)}
-                  className="bg-red-500/10 hover:bg-red-500/20 text-red-400 p-2.5 rounded-xl transition border border-red-500/20 cursor-pointer shrink-0"
-                  title="حذف نهائي"
+              return (
+                <div 
+                  key={product.id} 
+                  className="bg-white/[0.03] border border-white/10 p-4 sm:p-5 rounded-2xl flex items-center justify-between gap-4 transition hover:border-[#F59E0B]/40"
                 >
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              </div>
-            ))
+                  <div className="flex items-center gap-3.5">
+                    <div className="w-12 h-12 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center shrink-0 overflow-hidden">
+                      {prodImg ? (
+                        <img src={prodImg} alt="" className="w-full h-full object-cover" />
+                      ) : (
+                        <Package className="w-6 h-6 text-[#F59E0B]" />
+                      )}
+                    </div>
+                    <div>
+                      <h3 className="font-bold text-sm text-white">{renderLocalized(product.name)}</h3>
+                      <p className="text-xs text-[#F59E0B] font-bold mt-1">
+                        {prodPriceDisplay} د.ت <span className="text-gray-400 font-normal">| المخزون: {prodStockDisplay}</span>
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* زر الحذف النهائي */}
+                  <button
+                    type="button"
+                    onClick={() => promptDelete('product', product)}
+                    className="bg-red-500/10 hover:bg-red-500/20 text-red-400 p-2.5 rounded-xl transition border border-red-500/20 cursor-pointer shrink-0"
+                    title="حذف نهائي"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              );
+            })
           )}
         </div>
       )}
@@ -356,7 +379,7 @@ export default function OwnerDashboardMaster() {
             </div>
             <h3 className="text-base font-bold mb-2">تأكيد الحذف النهائي</h3>
             <p className="text-xs text-gray-400 mb-6 leading-relaxed">
-              هل أنت متأكد من رغبتك في مسح العنصر <span className="text-white font-bold">"{itemToDelete?.item?.name}"</span> نهائياً من البرنامج؟ سيتم إزالته تماماً لتخفيف الحمل عن السيرفر.
+              هل أنت متأكد من رغبتك في مسح العنصر <span className="text-white font-bold">"{renderLocalized(itemToDelete?.item?.name)}"</span> نهائياً من البرنامج؟ سيتم إزالته تماماً لتخفيف الحمل عن السيرفر.
             </p>
             <div className="flex items-center gap-3">
               <button 

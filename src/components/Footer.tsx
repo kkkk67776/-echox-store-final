@@ -5,8 +5,7 @@ import {
   Mail, 
   MapPin, 
   ShieldCheck, 
-  Truck, 
-  Lock 
+  Truck 
 } from 'lucide-react';
 
 export const Footer: React.FC = () => {
@@ -148,17 +147,8 @@ export const Footer: React.FC = () => {
         </div>
 
         {/* Bottom Strip */}
-        <div className="pt-8 mt-8 border-t border-slate-800/80 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-slate-500">
+        <div className="pt-8 mt-8 border-t border-slate-800/80 flex flex-col sm:flex-row items-center justify-center text-center gap-4 text-xs text-slate-500">
           <p>{t.footer.rights}</p>
-
-          {/* Owner Entrance Link */}
-          <button
-            onClick={() => handleLinkClick('/owner/dashboard')}
-            className="flex items-center gap-1.5 text-slate-400 hover:text-[#FF6B00] transition-colors font-bold"
-          >
-            <Lock className="w-3.5 h-3.5" />
-            <span>{t.footer.ownerPortalLink}</span>
-          </button>
         </div>
       </div>
     </footer>
