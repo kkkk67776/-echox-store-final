@@ -77,14 +77,14 @@ export const ProductDetailModal: React.FC = () => {
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6 animate-fadeIn">
       <div 
-        className="bg-white w-full max-w-5xl rounded-3xl shadow-2xl border border-slate-200 overflow-hidden relative my-auto max-h-[92vh] flex flex-col"
+        className="bg-white dark:bg-[#0F172A] w-full max-w-5xl rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden relative my-auto max-h-[92vh] flex flex-col text-[#0F172A] dark:text-slate-100"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Close Button */}
         <button
           onClick={() => setSelectedProductId(null)}
           aria-label="Close modal"
-          className="absolute top-4 left-4 sm:top-5 sm:left-5 z-20 w-10 h-10 rounded-full bg-white/90 hover:bg-white border border-slate-200 text-slate-700 hover:text-slate-900 flex items-center justify-center shadow-md transition-all"
+          className="absolute top-4 left-4 sm:top-5 sm:left-5 z-20 w-10 h-10 rounded-full bg-white/90 dark:bg-slate-800/90 hover:bg-white dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:text-slate-900 dark:hover:text-white flex items-center justify-center shadow-md transition-all cursor-pointer"
         >
           <X className="w-5 h-5" />
         </button>
@@ -97,7 +97,7 @@ export const ProductDetailModal: React.FC = () => {
             
             {/* Column 1: Multi-Image Gallery (7 cols on desktop) */}
             <div className="lg:col-span-7 space-y-4">
-              <div className="relative aspect-4/3 rounded-2xl bg-[#F5F2EB] overflow-hidden border border-[#E8E4DD]">
+              <div className="relative aspect-4/3 rounded-2xl bg-[#F5F2EB] dark:bg-[#1E293B] overflow-hidden border border-[#E8E4DD] dark:border-slate-700">
                 <img 
                   src={product.images[activeImageIndex] || product.images[0]} 
                   alt={product.name[language]}
@@ -120,7 +120,7 @@ export const ProductDetailModal: React.FC = () => {
                       key={idx}
                       onClick={() => setActiveImageIndex(idx)}
                       className={`relative w-20 h-20 rounded-xl overflow-hidden border-2 transition-all shrink-0 ${
-                        activeImageIndex === idx ? 'border-[#FF6B00] ring-2 ring-[#FF6B00]/20' : 'border-[#E8E4DD] opacity-70 hover:opacity-100'
+                        activeImageIndex === idx ? 'border-[#FF6B00] ring-2 ring-[#FF6B00]/20' : 'border-[#E8E4DD] dark:border-slate-700 opacity-70 hover:opacity-100'
                       }`}
                     >
                       <img 
@@ -135,21 +135,21 @@ export const ProductDetailModal: React.FC = () => {
               )}
 
               {/* Trust Badges Strip */}
-              <div className="grid grid-cols-3 gap-3 pt-3 border-t border-slate-100 text-center">
-                <div className="p-3 bg-slate-50 rounded-xl text-xs space-y-1">
+              <div className="grid grid-cols-3 gap-3 pt-3 border-t border-slate-100 dark:border-slate-800 text-center">
+                <div className="p-3 bg-slate-50 dark:bg-[#1E293B] rounded-xl text-xs space-y-1 border border-transparent dark:border-slate-800">
                   <ShieldCheck className="w-5 h-5 text-[#FF6B00] mx-auto" />
-                  <p className="font-bold text-slate-800">ضمان أصلي 100%</p>
-                  <p className="text-slate-500 text-[11px]">مرفق بشهادة المصنع</p>
+                  <p className="font-bold text-slate-800 dark:text-slate-100">ضمان أصلي 100%</p>
+                  <p className="text-slate-500 dark:text-slate-400 text-[11px]">مرفق بشهادة المصنع</p>
                 </div>
-                <div className="p-3 bg-slate-50 rounded-xl text-xs space-y-1">
-                  <Truck className="w-5 h-5 text-emerald-600 mx-auto" />
-                  <p className="font-bold text-slate-800">توصيل 24 ولاية</p>
-                  <p className="text-slate-500 text-[11px]">خلال 24-48 ساعة</p>
+                <div className="p-3 bg-slate-50 dark:bg-[#1E293B] rounded-xl text-xs space-y-1 border border-transparent dark:border-slate-800">
+                  <Truck className="w-5 h-5 text-emerald-600 dark:text-emerald-400 mx-auto" />
+                  <p className="font-bold text-slate-800 dark:text-slate-100">توصيل 24 ولاية</p>
+                  <p className="text-slate-500 dark:text-slate-400 text-[11px]">خلال 24-48 ساعة</p>
                 </div>
-                <div className="p-3 bg-slate-50 rounded-xl text-xs space-y-1">
-                  <CheckCircle className="w-5 h-5 text-blue-600 mx-auto" />
-                  <p className="font-bold text-slate-800">معاينة قبل الدفع</p>
-                  <p className="text-slate-500 text-[11px]">دفع عند الاستلام</p>
+                <div className="p-3 bg-slate-50 dark:bg-[#1E293B] rounded-xl text-xs space-y-1 border border-transparent dark:border-slate-800">
+                  <CheckCircle className="w-5 h-5 text-blue-600 dark:text-blue-400 mx-auto" />
+                  <p className="font-bold text-slate-800 dark:text-slate-100">معاينة قبل الدفع</p>
+                  <p className="text-slate-500 dark:text-slate-400 text-[11px]">دفع عند الاستلام</p>
                 </div>
               </div>
             </div>
@@ -158,7 +158,7 @@ export const ProductDetailModal: React.FC = () => {
             <div className="lg:col-span-5 space-y-6">
               
               {/* Company & Governorate meta */}
-              <div className="flex items-center gap-2 text-xs text-slate-500">
+              <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
                 <span className="flex items-center gap-1 font-semibold text-[#FF6B00]">
                   <Building2 className="w-3.5 h-3.5" />
                   <span>{product.companyName}</span>
@@ -171,7 +171,7 @@ export const ProductDetailModal: React.FC = () => {
               </div>
 
               {/* Title */}
-              <h1 className="text-xl sm:text-2xl font-black text-slate-900 leading-snug">
+              <h1 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white leading-snug">
                 {product.name[language]}
               </h1>
 
@@ -181,21 +181,21 @@ export const ProductDetailModal: React.FC = () => {
                   {[...Array(5)].map((_, i) => (
                     <Star 
                       key={i} 
-                      className={`w-4 h-4 ${i < Math.floor(product.rating) ? 'fill-amber-500' : 'text-slate-300'}`} 
+                      className={`w-4 h-4 ${i < Math.floor(product.rating) ? 'fill-amber-500' : 'text-slate-300 dark:text-slate-600'}`} 
                     />
                   ))}
                 </div>
-                <span className="font-bold text-slate-800">{product.rating}</span>
-                <span className="text-slate-500">({product.reviewCount} {t.product.reviewSingular})</span>
+                <span className="font-bold text-slate-800 dark:text-slate-200">{product.rating}</span>
+                <span className="text-slate-500 dark:text-slate-400">({product.reviewCount} {t.product.reviewSingular})</span>
               </div>
 
               {/* Price Block */}
-              <div className="p-4 rounded-2xl bg-[#FAF8F5] border border-[#E8E4DD] space-y-1">
+              <div className="p-4 rounded-2xl bg-[#FAF8F5] dark:bg-[#1E293B] border border-[#E8E4DD] dark:border-slate-800 space-y-1">
                 <div className="flex items-baseline gap-2">
-                  <span className="text-2xl sm:text-3xl font-black text-slate-900 tabular-nums">
+                  <span className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white tabular-nums">
                     {product.price.toFixed(3)}
                   </span>
-                  <span className="text-sm font-bold text-slate-700">{t.cart.currency}</span>
+                  <span className="text-sm font-bold text-slate-700 dark:text-slate-300">{t.cart.currency}</span>
                   
                   {product.originalPrice && product.originalPrice > product.price && (
                     <span className="text-sm text-slate-400 line-through tabular-nums mr-2">
@@ -203,7 +203,7 @@ export const ProductDetailModal: React.FC = () => {
                     </span>
                   )}
                 </div>
-                <p className="text-xs text-emerald-700 font-bold">
+                <p className="text-xs text-emerald-700 dark:text-emerald-400 font-bold">
                   {product.stock > 0 ? `✓ متوفر بالمخزون (${product.stock} قطع متاحة للتسليم الفوري)` : '✕ غير متوفر حالياً'}
                 </p>
               </div>
@@ -211,11 +211,11 @@ export const ProductDetailModal: React.FC = () => {
               {/* Quantity Stepper & Actions */}
               <div className="space-y-3">
                 <div className="flex items-center gap-4">
-                  <span className="text-xs font-bold text-slate-700">{t.product.quantity}</span>
-                  <div className="flex items-center border border-slate-300 rounded-xl overflow-hidden bg-white">
+                  <span className="text-xs font-bold text-slate-700 dark:text-slate-300">{t.product.quantity}</span>
+                  <div className="flex items-center border border-slate-300 dark:border-slate-700 rounded-xl overflow-hidden bg-white dark:bg-[#0F172A]">
                     <button
                       onClick={() => setQuantity(Math.max(1, quantity - 1))}
-                      className="p-2 text-slate-600 hover:bg-slate-100 transition-colors"
+                      className="p-2 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
                       aria-label="Decrease quantity"
                     >
                       <Minus className="w-4 h-4" />

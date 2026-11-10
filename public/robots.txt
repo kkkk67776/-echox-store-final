@@ -1,7 +1,5 @@
 User-agent: *
 Allow: /
-Disallow: /owner/
-Disallow: /account
-Disallow: /my_orders
 
-Sitemap: https://echox-store.netlify.app/sitemap.xml
+Sitemap: https://ais-pre-h73tzqybodmt5v2ji4xgqc-519756359948.europe-west2.run.app/sitemap.xml
+Sitemap: https://ais-dev-h73tzqybodmt5v2ji4xgqc-519756359948.europe-west2.run.app/sitemap.xml

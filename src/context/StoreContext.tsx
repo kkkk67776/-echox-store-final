@@ -13,7 +13,9 @@ import {
   SiteSettings, 
   ContactInquiry, 
   ChatMessage, 
-  Review 
+  Review,
+  CategoryItem,
+  PromoBanner
 } from '../types';
 import { 
   INITIAL_COMPANIES, 
@@ -23,9 +25,17 @@ import {
   INITIAL_SITE_SETTINGS 
 } from '../data/initialData';
 import { getTranslation } from '../data/translations';
+import { 
+  getAuthorizedOwnerEmail, 
+  setAuthorizedOwnerEmail, 
+  getAuthorizedOwnerPhone, 
+  setAuthorizedOwnerPhone 
+} from '../lib/security';
+
 
 interface StoreContextType {
   language: Language;
+  currentLanguage: Language;
   setLanguage: (lang: Language) => void;
   t: ReturnType<typeof getTranslation>;
   currentView: string;
@@ -83,6 +93,17 @@ interface StoreContextType {
   updateCompany: (id: string, updates: Partial<Company>) => void;
   deleteCompany: (id: string) => void;
   
+  // Categories & Chips
+  categories: CategoryItem[];
+  addCategory: (category: CategoryItem) => void;
+  deleteCategory: (id: string) => void;
+  
+  // Banners & Promos
+  banners: PromoBanner[];
+  addBanner: (banner: Omit<PromoBanner, 'id'>) => void;
+  deleteBanner: (id: string) => void;
+  toggleBannerActive: (id: string) => void;
+
   // Orders
   orders: Order[];
   createOrder: (orderData: {
@@ -94,7 +115,9 @@ interface StoreContextType {
     carrierName?: string;
     notes?: string;
   }) => Order;
+  addManualOrder: (orderData: Partial<Order>) => Order;
   updateOrderStatus: (orderId: string, status: OrderStatus, note?: string) => void;
+  deleteOrder: (orderId: string) => void;
   
   // Contact & Chat
   inquiries: ContactInquiry[];
@@ -108,6 +131,10 @@ interface StoreContextType {
   updateSiteSettings: (settings: Partial<SiteSettings>) => void;
   ownerSettings: OwnerSettings;
   updateOwnerSettings: (settings: Partial<OwnerSettings>) => void;
+  
+  // Dark Mode
+  isDarkMode: boolean;
+  toggleDarkMode: () => void;
 }
 
 const StoreContext = createContext<StoreContextType | undefined>(undefined);
@@ -136,6 +163,37 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     document.documentElement.lang = language;
     document.documentElement.dir = language === 'ar' ? 'rtl' : 'ltr';
   }, [language]);
+
+  // Dark Mode State with localStorage persistence
+  const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('echox_theme');
+      if (saved) return saved === 'dark';
+      return typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    } catch {
+      return false;
+    }
+  });
+
+  const toggleDarkMode = () => {
+    setIsDarkMode(prev => {
+      const next = !prev;
+      try {
+        localStorage.setItem('echox_theme', next ? 'dark' : 'light');
+      } catch (e) {
+        console.warn('Storage theme write error:', e);
+      }
+      return next;
+    });
+  };
+
+  useEffect(() => {
+    if (isDarkMode) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  }, [isDarkMode]);
 
   const t = getTranslation(language);
 
@@ -200,6 +258,145 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   }, [orders]);
 
+  // 5.1 Categories & Chips
+  const DEFAULT_CATEGORIES: CategoryItem[] = [
+    { id: 'all', label: 'الكل', icon: '⚡', desc: 'كافة المعروضات المعتمدة' },
+    { id: 'power_tools', label: 'أدوات ومعدات ورشات', icon: '🔧', desc: 'مثاقب، مناشير، ومعدات ورشات' },
+    { id: 'auto_parts', label: 'قطع غيار سيارات', icon: '🚗', desc: 'قطع ميكانيكية وكهربائية للسيارات' },
+    { id: 'electronics', label: 'أجهزة قياس وإلكترونيات', icon: '🔌', desc: 'أجهزة قياس، لوحات وقطع إلكترونية' },
+    { id: 'industrial', label: 'معدات صناعية ثقيلة', icon: '🏭', desc: 'معدات المصانع والورشات الثقيلة' },
+    { id: 'smart_home', label: 'أنظمة وحماية ذكية', icon: '🏠', desc: 'أتمتة وحماية المنازل الذكية' },
+  ];
+
+  const [categories, setCategories] = useState<CategoryItem[]>(() => {
+    try {
+      const saved = localStorage.getItem('echox_categories');
+      return saved ? JSON.parse(saved) : DEFAULT_CATEGORIES;
+    } catch {
+      return DEFAULT_CATEGORIES;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('echox_categories', JSON.stringify(categories));
+    } catch (e) {
+      console.warn('Storage write error:', e);
+    }
+  }, [categories]);
+
+  const addCategory = (category: CategoryItem) => {
+    setCategories(prev => {
+      if (prev.some(c => c.id === category.id)) return prev;
+      return [...prev, category];
+    });
+  };
+
+  const deleteCategory = (id: string) => {
+    if (id === 'all') return;
+    setCategories(prev => prev.filter(c => c.id !== id));
+  };
+
+  // 5.2 Banners & Promos
+  const DEFAULT_BANNERS: PromoBanner[] = [
+    {
+      id: 'banner_1',
+      tag: 'عروض حصرية',
+      title: 'عروض وتخفيضات اليوم على كافة المعدات وقطع الغيار',
+      subtitle: 'توصيل سريع لكافة الـ24 ولاية والدفع عند المعاينة والاستلام',
+      active: true,
+      bgGradient: 'from-[#FF6B00] via-[#F97316] to-[#EA580C]'
+    }
+  ];
+
+  const [banners, setBanners] = useState<PromoBanner[]>(() => {
+    try {
+      const saved = localStorage.getItem('echox_banners');
+      return saved ? JSON.parse(saved) : DEFAULT_BANNERS;
+    } catch {
+      return DEFAULT_BANNERS;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('echox_banners', JSON.stringify(banners));
+    } catch (e) {
+      console.warn('Storage write error:', e);
+    }
+  }, [banners]);
+
+  const addBanner = (bannerData: Omit<PromoBanner, 'id'>) => {
+    const newBanner: PromoBanner = {
+      ...bannerData,
+      id: `banner_${Date.now()}`
+    };
+    setBanners(prev => [newBanner, ...prev]);
+  };
+
+  const deleteBanner = (id: string) => {
+    setBanners(prev => prev.filter(b => b.id !== id));
+  };
+
+  const toggleBannerActive = (id: string) => {
+    setBanners(prev => prev.map(b => b.id === id ? { ...b, active: !b.active } : b));
+  };
+
+  // 5.3 Order Deletion & Manual Order Creation
+  const deleteOrder = (orderId: string) => {
+    setOrders(prev => prev.filter(o => o.id !== orderId));
+  };
+
+  const addManualOrder = (orderData: Partial<Order>): Order => {
+    const newId = `ord_manual_${Date.now()}`;
+    const tracking = `ECH-TN-${Math.floor(100000 + Math.random() * 900000)}`;
+    const now = new Date().toISOString();
+    const created: Order = {
+      id: newId,
+      trackingNumber: tracking,
+      customerName: orderData.customerName || 'عميل هاتفي مباشر',
+      customerEmail: orderData.customerEmail || '',
+      customerPhone: orderData.customerPhone || '+216 00 000 000',
+      shippingAddress: orderData.shippingAddress || {
+        id: `addr_${Date.now()}`,
+        isDefault: true,
+        fullName: orderData.customerName || 'عميل هاتف',
+        phone: orderData.customerPhone || '+216 00 000 000',
+        governorate: 'tunis',
+        city: 'تونس العاصمة',
+        postalCode: '1000',
+        street: 'طلب مباشر عبر الهاتف / واتساب'
+      },
+      items: orderData.items && orderData.items.length > 0 ? orderData.items : [
+        {
+          productId: products[0]?.id || 'prod_1',
+          productName: products[0]?.name || { ar: 'طلب هاتفي مباشر', fr: 'Commande directe', en: 'Direct Order' },
+          productImage: products[0]?.images[0] || '/assets/aistudio/file_0000000048188243bc0b721218c854fc_ea3ea21d.png',
+          unitPrice: orderData.totalAmount || 150.000,
+          quantity: 1,
+          totalPrice: orderData.totalAmount || 150.000
+        }
+      ],
+      subtotal: orderData.subtotal || orderData.totalAmount || 150.000,
+      discount: orderData.discount || 0,
+      shippingFee: orderData.shippingFee || 0,
+      totalAmount: orderData.totalAmount || 150.000,
+      status: orderData.status || 'new',
+      paymentMethod: orderData.paymentMethod || 'cod',
+      paymentStatus: orderData.paymentStatus || 'pending',
+      carrierName: orderData.carrierName || 'LivriTN Logistics',
+      createdAt: now,
+      updatedAt: now,
+      notes: orderData.notes || 'تم التسجيل يدوياً بواسطة المالك من لوحة التحكم',
+      statusHistory: [
+        { status: orderData.status || 'new', timestamp: now, note: 'تم تسجيل الطلب يدوياً عبر الهاتف / واتساب' }
+      ]
+    };
+
+    setOrders(prev => [created, ...prev]);
+    return created;
+  };
+
   // 6. Settings
   const [siteSettings, setSiteSettingsState] = useState<SiteSettings>(() => {
     try {
@@ -213,9 +410,18 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [ownerSettings, setOwnerSettingsState] = useState<OwnerSettings>(() => {
     try {
       const saved = localStorage.getItem('echox_owner_settings');
-      return saved ? JSON.parse(saved) : INITIAL_OWNER_SETTINGS;
+      const base = saved ? JSON.parse(saved) : INITIAL_OWNER_SETTINGS;
+      return {
+        ...base,
+        loginEmail: getAuthorizedOwnerEmail(),
+        primaryPhone: getAuthorizedOwnerPhone()
+      };
     } catch {
-      return INITIAL_OWNER_SETTINGS;
+      return {
+        ...INITIAL_OWNER_SETTINGS,
+        loginEmail: getAuthorizedOwnerEmail(),
+        primaryPhone: getAuthorizedOwnerPhone()
+      };
     }
   });
 
@@ -232,13 +438,16 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   const updateOwnerSettings = (updates: Partial<OwnerSettings>) => {
+    if (updates.loginEmail) {
+      setAuthorizedOwnerEmail(updates.loginEmail);
+    }
+    if (updates.primaryPhone) {
+      setAuthorizedOwnerPhone(updates.primaryPhone);
+    }
     setOwnerSettingsState(prev => {
-      // Ensure primaryPhone (+21621511162) and loginEmail (abdelkaderbahri570@gmail.com) remain locked
       const next = { 
         ...prev, 
-        ...updates,
-        primaryPhone: INITIAL_OWNER_SETTINGS.primaryPhone,
-        loginEmail: INITIAL_OWNER_SETTINGS.loginEmail
+        ...updates
       };
       try {
         localStorage.setItem('echox_owner_settings', JSON.stringify(next));
@@ -662,7 +871,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     {
       id: 'msg_welcome',
       sender: 'owner',
-      text: 'مرحباً بك في ECHOX STORE! كيف يمكننا مساعدتك اليوم بخصوص الأجهزة، القطع الأصلية، أو التوصيل لولايتك؟',
+      text: 'مرحباً بك في ECHOX Store! كيف يمكننا مساعدتك اليوم بخصوص الأجهزة، القطع الأصلية، أو التوصيل لولايتك؟',
       timestamp: '2026-11-06T08:00:00Z'
     }
   ]);
@@ -680,6 +889,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   return (
     <StoreContext.Provider value={{
       language,
+      currentLanguage: language,
       setLanguage,
       t,
       currentView,
@@ -731,9 +941,20 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       updateCompany,
       deleteCompany,
       
+      categories,
+      addCategory,
+      deleteCategory,
+      
+      banners,
+      addBanner,
+      deleteBanner,
+      toggleBannerActive,
+      
       orders,
       createOrder,
+      addManualOrder,
       updateOrderStatus,
+      deleteOrder,
       
       inquiries,
       sendInquiry,
@@ -744,7 +965,10 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       siteSettings,
       updateSiteSettings,
       ownerSettings,
-      updateOwnerSettings
+      updateOwnerSettings,
+      
+      isDarkMode,
+      toggleDarkMode
     }}>
       {children}
     </StoreContext.Provider>

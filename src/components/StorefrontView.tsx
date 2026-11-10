@@ -1,58 +1,46 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useStore } from '../context/StoreContext';
 import { ProductCard } from './ProductCard';
 import { 
-  ShieldCheck, 
-  Truck, 
-  Banknote, 
-  Headphones, 
-  Sparkles, 
-  Timer, 
+  ArrowLeft, 
+  Star, 
   MapPin, 
-  ChevronRight, 
-  ArrowLeft,
-  ArrowRight,
-  Filter
+  Sparkles,
+  TrendingUp,
+  ShieldCheck,
+  Truck,
+  Banknote,
+  Headphones,
+  Check,
+  Plus
 } from 'lucide-react';
 import { TUNISIAN_GOVERNORATES } from '../data/governorates';
+import { Product } from '../types';
 
 export const StorefrontView: React.FC = () => {
   const { 
     products, 
-    companies,
     language, 
     t, 
     searchQuery, 
     selectedCategory, 
     setSelectedCategory,
     setSelectedProductId,
-    setCurrentView 
+    addToCart,
+    banners
   } = useStore();
 
   const [selectedGovFilter, setSelectedGovFilter] = useState<string>('all');
+  const [addedItemIds, setAddedItemIds] = useState<Record<string, boolean>>({});
 
-  // Flash Countdown Timer state (e.g. 18 hours, 42 minutes, 15 seconds)
-  const [timeLeft, setTimeLeft] = useState({
-    hours: 18,
-    minutes: 42,
-    seconds: 15
-  });
-
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setTimeLeft(prev => {
-        if (prev.seconds > 0) {
-          return { ...prev, seconds: prev.seconds - 1 };
-        } else if (prev.minutes > 0) {
-          return { ...prev, minutes: 59, seconds: 59 };
-        } else if (prev.hours > 0) {
-          return { hours: prev.hours - 1, minutes: 59, seconds: 59 };
-        }
-        return { hours: 24, minutes: 0, seconds: 0 };
-      });
-    }, 1000);
-    return () => clearInterval(timer);
-  }, []);
+  const handleQuickAdd = (e: React.MouseEvent, product: Product) => {
+    e.stopPropagation();
+    addToCart(product, 1);
+    setAddedItemIds(prev => ({ ...prev, [product.id]: true }));
+    setTimeout(() => {
+      setAddedItemIds(prev => ({ ...prev, [product.id]: false }));
+    }, 1200);
+  };
 
   // Filter products by category, search query, active status, and governorate
   const filteredProducts = products.filter(product => {
@@ -64,7 +52,7 @@ export const StorefrontView: React.FC = () => {
       const matchName = product.name[language]?.toLowerCase().includes(q) ||
         product.name.ar.toLowerCase().includes(q) ||
         product.name.fr.toLowerCase().includes(q);
-      const matchComp = product.companyName.toLowerCase().includes(q);
+      const matchComp = product.companyName?.toLowerCase().includes(q);
       const matchDesc = product.description[language]?.toLowerCase().includes(q);
       if (!matchName && !matchComp && !matchDesc) return false;
     }
@@ -82,207 +70,362 @@ export const StorefrontView: React.FC = () => {
     return true;
   });
 
-  const categories = [
-    { id: 'all', label: t.categories.all },
-    { id: 'power_tools', label: t.categories.power_tools },
-    { id: 'auto_parts', label: t.categories.auto_parts },
-    { id: 'electronics', label: t.categories.electronics },
-    { id: 'industrial', label: t.categories.industrial },
-    { id: 'smart_home', label: t.categories.smart_home },
-  ];
+  // مجموعات خاصة بنمط Google Play
+  const suggestedForYou = products.slice(0, 8);
+  const topTrending = products.slice().sort((a, b) => (b.rating || 5) - (a.rating || 5)).slice(0, 6);
+  const powerToolsOnly = products.filter(p => p.category === 'power_tools');
+  const autoPartsOnly = products.filter(p => p.category === 'auto_parts');
+
+  const isBrowsingAll = selectedCategory === 'all' && !searchQuery.trim() && selectedGovFilter === 'all';
 
   return (
-    <div className="space-y-12 pb-16">
+    <div className="space-y-6 sm:space-y-8 pb-24 bg-white dark:bg-[#0B0F17] transition-colors">
       
-      {/* 1. Hero Showcase Banner */}
-      <section className="relative overflow-hidden bg-[#0B0F17] text-white">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 lg:py-20">
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-center">
-            
-            {/* Left Content (6 cols) */}
-            <div className="lg:col-span-7 space-y-6 text-center lg:text-start">
-              <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-[#FF6B00]/15 border border-[#FF6B00]/30 text-[#FF6B00] text-xs font-bold">
-                <Sparkles className="w-3.5 h-3.5" />
-                <span>{t.hero.badge}</span>
-              </div>
-
-              <h1 className="text-3xl sm:text-4xl lg:text-5xl font-black tracking-tight leading-tight sm:leading-tight">
-                {t.hero.title}
-              </h1>
-
-              <p className="text-sm sm:text-base text-slate-300 max-w-xl leading-relaxed">
-                {t.hero.subtitle}
-              </p>
-
-              <div className="flex flex-col sm:flex-row items-center justify-center lg:justify-start gap-3 pt-2">
-                <a
-                  href="#catalog"
-                  className="w-full sm:w-auto px-8 py-3.5 rounded-xl bg-[#FF6B00] hover:bg-[#e05e00] text-white font-bold text-sm shadow-lg shadow-[#FF6B00]/25 transition-all text-center"
-                >
-                  {t.hero.shopNow}
-                </a>
-                <button
-                  onClick={() => {
-                    setCurrentView('promise');
-                    window.scrollTo({ top: 0, behavior: 'smooth' });
-                  }}
-                  className="w-full sm:w-auto px-6 py-3.5 rounded-xl bg-white/10 hover:bg-white/20 text-white font-bold text-sm border border-white/10 transition-all text-center"
-                >
-                  {t.hero.learnPromise}
-                </button>
-              </div>
-
-              {/* Trust Indicators */}
-              <div className="pt-6 border-t border-slate-800 flex items-center justify-center lg:justify-start gap-6 text-xs text-slate-400 font-semibold">
-                <div className="flex items-center gap-2">
-                  <ShieldCheck className="w-4 h-4 text-[#FF6B00]" />
-                  <span>{t.hero.guarantee}</span>
+      {/* 1. إعلان ترويجي مصغر ذكي ومدمج (Compact Smart Banner) */}
+      <div className="max-w-7xl mx-auto px-2.5 sm:px-4 pt-2">
+        {banners && banners.filter(b => b.active).length > 0 ? (
+          <div className="space-y-2">
+            {banners.filter(b => b.active).map(b => (
+              <div 
+                key={b.id} 
+                className={`rounded-3xl bg-gradient-to-r ${b.bgGradient || 'from-[#FF6B00] via-[#F97316] to-[#EA580C]'} text-white p-3 sm:p-4 shadow-xs flex items-center justify-between gap-3 overflow-hidden relative`}
+              >
+                <div className="flex items-center gap-2.5 z-10">
+                  <span className="w-8 h-8 rounded-2xl bg-white/20 flex items-center justify-center shrink-0">
+                    <Sparkles className="w-4 h-4 text-white" />
+                  </span>
+                  <div>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="text-[10px] font-black uppercase tracking-wider bg-white text-[#FF6B00] px-2.5 py-0.5 rounded-full shadow-2xs">
+                        {b.tag || 'عروض حصرية'}
+                      </span>
+                      <span className="text-xs sm:text-sm font-black text-white">
+                        {b.title}
+                      </span>
+                    </div>
+                    {b.subtitle && (
+                      <p className="text-[11px] text-white/90 hidden xs:block mt-0.5">
+                        {b.subtitle}
+                      </p>
+                    )}
+                  </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <Truck className="w-4 h-4 text-emerald-400" />
-                  <span>توصيل 24 ولاية</span>
+                <div className="absolute -left-10 -bottom-10 w-28 h-28 rounded-full bg-white/10 blur-xl pointer-events-none"></div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="rounded-3xl bg-gradient-to-r from-[#FF6B00] via-[#F97316] to-[#EA580C] text-white p-3 sm:p-4 shadow-xs flex items-center justify-between gap-3 overflow-hidden relative">
+            <div className="flex items-center gap-2.5 z-10">
+              <span className="w-8 h-8 rounded-2xl bg-white/20 flex items-center justify-center shrink-0">
+                <Sparkles className="w-4 h-4 text-white" />
+              </span>
+              <div>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-[10px] font-black uppercase tracking-wider bg-white text-[#FF6B00] px-2.5 py-0.5 rounded-full shadow-2xs">
+                    عروض حصرية
+                  </span>
+                  <span className="text-xs sm:text-sm font-black text-white">
+                    عروض وتخفيضات اليوم على كافة المعدات وقطع الغيار
+                  </span>
                 </div>
+                <p className="text-[11px] text-white/90 hidden xs:block mt-0.5">
+                  توصيل سريع لكافة الـ24 ولاية والدفع عند المعاينة والاستلام
+                </p>
               </div>
             </div>
+            <div className="absolute -left-10 -bottom-10 w-28 h-28 rounded-full bg-white/10 blur-xl pointer-events-none"></div>
+          </div>
+        )}
+      </div>
 
-            {/* Right Media Focal Anchor (5 cols) */}
-            <div className="lg:col-span-5 relative">
-              <div className="relative rounded-3xl overflow-hidden border border-slate-800 shadow-2xl aspect-16/10 lg:aspect-4/3 group">
-                <img 
-                  src="/src/assets/images/hero_echox_tunisia_store_1793963107162.jpg" 
-                  alt="ECHOX Store Hardware Showroom"
-                  referrerPolicy="no-referrer"
-                  className="w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-700" 
-                />
-                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent flex flex-col justify-end p-6">
-                  <span className="text-[11px] font-bold text-[#FF6B00] uppercase tracking-wider">
-                    ECHOX Certified Inventory
-                  </span>
-                  <p className="text-sm font-bold text-white">
-                    أجهزة وقطع أصلية جاهزة للشحن الفوري لكافة الورشات والمنازل في تونس
+      {/* إذا كان المستخدم يتصفح الكل ولم يقم ببحث مخصص: اعرض أقسام Google Play الأفقية والقوائم الرأسية */}
+      {isBrowsingAll && (
+        <>
+          {/* 2. القسم الأفقي الأول: مقترحة لك (Recommended / For You Carousel) */}
+          <section className="max-w-7xl mx-auto px-2.5 sm:px-4 space-y-3">
+            {/* Header مع سهم جانبي للمزيد */}
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-base sm:text-lg font-black text-[#0F172A] dark:text-slate-100 leading-tight">
+                  مقترحة لك
+                </h2>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 font-medium">
+                  استناداً إلى نشاطك الأخير والأجهزة الأكثر ملائمة لورشتك
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setSelectedCategory('power_tools')}
+                className="flex items-center gap-1 text-xs font-bold text-[#FF6B00] hover:text-[#E05E00] p-1 rounded-full hover:bg-[#FF6B00]/10 transition-colors"
+                title="عرض المزيد"
+              >
+                <span className="hidden sm:inline">المزيد</span>
+                <ArrowLeft className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* شريط التمرير الأفقي لبطاقات المنتجات المربعة (Horizontal Carousel) */}
+            <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-none snap-x">
+              {suggestedForYou.map((product) => {
+                const prodName = product.name[language] || product.name.ar;
+                const isAdded = addedItemIds[product.id];
+                return (
+                  <div
+                    key={product.id}
+                    onClick={() => setSelectedProductId(product.id)}
+                    className="w-36 sm:w-44 shrink-0 snap-start bg-[#F8FAFC] dark:bg-[#1E293B] rounded-2xl border border-[#E2E8F0] dark:border-slate-800 hover:border-[#CBD5E1] dark:hover:border-slate-700 p-2 flex flex-col justify-between cursor-pointer group transition-all hover:shadow-md"
+                  >
+                    <div>
+                      {/* حاوية الصورة المربعة بنسبة 1:1 وزوايا دائرية ناعمة */}
+                      <div className="aspect-square w-full bg-white dark:bg-[#0F172A] rounded-xl overflow-hidden p-2 flex items-center justify-center border border-[#F1F5F9] dark:border-slate-700/60 relative">
+                        <img
+                          src={product.images[0] || '/assets/aistudio/file_0000000048188243bc0b721218c854fc_ea3ea21d.png'}
+                          alt={prodName}
+                          loading="lazy"
+                          className="w-full h-full object-contain group-hover:scale-105 transition-transform duration-300"
+                        />
+                        {product.originalPrice && product.originalPrice > product.price && (
+                          <span className="absolute top-1.5 right-1.5 bg-[#FF6B00] text-white text-[9px] font-black px-1.5 py-0.5 rounded-md">
+                            تخفيض
+                          </span>
+                        )}
+                      </div>
+
+                      {/* تفاصيل المنتج أسفل البطاقة */}
+                      <div className="pt-2">
+                        <span className="text-[10px] text-slate-500 dark:text-slate-400 font-semibold block truncate">
+                          {product.companyName}
+                        </span>
+                        <h3 className="text-xs font-bold text-[#0F172A] dark:text-slate-100 line-clamp-2 leading-tight group-hover:text-[#FF6B00] transition-colors min-h-[1.9rem] my-0.5">
+                          {prodName}
+                        </h3>
+                        <div className="flex items-center gap-1 text-[10px] text-slate-600 dark:text-slate-400 mb-1">
+                          <Star className="w-3 h-3 fill-amber-400 text-amber-400 shrink-0" />
+                          <span className="font-bold text-[#0F172A] dark:text-slate-200">{product.rating || '4.9'}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* السعر وزر الإضافة السريع */}
+                    <div className="pt-1.5 border-t border-[#E2E8F0] dark:border-slate-800 flex items-center justify-between gap-1">
+                      <div>
+                        <span className="text-xs sm:text-sm font-black text-[#FF6B00] font-mono block leading-none">
+                          {product.price.toFixed(3)}
+                        </span>
+                        <span className="text-[9px] text-slate-500 dark:text-slate-400 font-bold">{t.cart.currency}</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={(e) => handleQuickAdd(e, product)}
+                        className={`w-7 h-7 rounded-xl flex items-center justify-center transition-all cursor-pointer active:scale-95 ${
+                          isAdded ? 'bg-emerald-600 text-white' : 'bg-[#FF6B00] hover:bg-[#E05E00] text-white shadow-xs'
+                        }`}
+                        title="أضف للسلة"
+                      >
+                        {isAdded ? <Check className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+
+          {/* 3. القائمة الرأسية المدمجة (Google Play Top Charts Ranked List) */}
+          <section className="max-w-7xl mx-auto px-2.5 sm:px-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="w-7 h-7 rounded-full bg-[#FF6B00]/10 flex items-center justify-center text-[#FF6B00]">
+                  <TrendingUp className="w-4 h-4" />
+                </span>
+                <div>
+                  <h2 className="text-base sm:text-lg font-black text-[#0F172A] dark:text-slate-100 leading-tight">
+                    أفضل الترتيبات • الأكثر طلباً
+                  </h2>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 font-medium">
+                    القطع والأدوات الأكثر مبيعاً وتقييماً من الحرفيين في تونس
                   </p>
                 </div>
               </div>
+
+              <button
+                type="button"
+                onClick={() => setSelectedCategory('all')}
+                className="flex items-center gap-1 text-xs font-bold text-[#FF6B00] hover:text-[#E05E00] p-1 rounded-full hover:bg-[#FF6B00]/10 transition-colors"
+                title="عرض الكل"
+              >
+                <span className="hidden sm:inline">الكل</span>
+                <ArrowLeft className="w-4 h-4" />
+              </button>
             </div>
 
+            {/* قائمة مرتبة عمودياً في أعمدة متناسقة (Top Charts Style) */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2.5">
+              {topTrending.map((product, index) => {
+                const prodName = product.name[language] || product.name.ar;
+                const isAdded = addedItemIds[product.id];
+                return (
+                  <div
+                    key={product.id}
+                    onClick={() => setSelectedProductId(product.id)}
+                    className="p-2.5 rounded-2xl bg-[#F8FAFC] dark:bg-[#1E293B] border border-[#E2E8F0] dark:border-slate-800 hover:border-[#CBD5E1] dark:hover:border-slate-700 flex items-center justify-between gap-3 cursor-pointer group transition-all hover:shadow-xs"
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      {/* رقم الترتيب */}
+                      <span className="w-5 text-sm font-black text-slate-400 dark:text-slate-500 font-mono text-center shrink-0">
+                        {index + 1}
+                      </span>
+
+                      {/* الصورة المصغرة المربعة بزوايا دائرية ناعمة */}
+                      <div className="w-13 h-13 sm:w-14 sm:h-14 rounded-2xl bg-white dark:bg-[#0F172A] border border-[#E2E8F0] dark:border-slate-700/60 p-1 shrink-0 flex items-center justify-center overflow-hidden">
+                        <img
+                          src={product.images[0] || '/assets/aistudio/file_0000000048188243bc0b721218c854fc_ea3ea21d.png'}
+                          alt={prodName}
+                          loading="lazy"
+                          className="w-full h-full object-contain group-hover:scale-105 transition-transform"
+                        />
+                      </div>
+
+                      {/* الاسم والقسم والتقييم */}
+                      <div className="min-w-0 truncate">
+                        <h4 className="text-xs sm:text-sm font-bold text-[#0F172A] dark:text-slate-100 truncate group-hover:text-[#FF6B00] transition-colors">
+                          {prodName}
+                        </h4>
+                        <div className="flex items-center gap-1.5 text-[10px] text-slate-500 dark:text-slate-400 font-semibold truncate mt-0.5">
+                          <span className="text-[#FF6B00]">{product.companyName}</span>
+                          <span>•</span>
+                          <span className="flex items-center gap-0.5">
+                            <Star className="w-3 h-3 fill-amber-400 text-amber-400 shrink-0" />
+                            <span className="text-slate-700 dark:text-slate-300">{product.rating || '4.9'}</span>
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* السعر وزر الطلب / الإضافة */}
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className="text-xs sm:text-sm font-black text-[#FF6B00] font-mono">
+                        {product.price.toFixed(3)} د.ت
+                      </span>
+                      <button
+                        type="button"
+                        onClick={(e) => handleQuickAdd(e, product)}
+                        className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all cursor-pointer active:scale-95 ${
+                          isAdded
+                            ? 'bg-emerald-600 text-white'
+                            : 'bg-[#FF6B00] hover:bg-[#E05E00] text-white shadow-xs'
+                        }`}
+                      >
+                        {isAdded ? 'تم ✓' : 'أضف'}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+
+          {/* 4. القسم الأفقي الثاني: أدوات ومعدات ورشات (Power Tools Carousel) */}
+          {powerToolsOnly.length > 0 && (
+            <section className="max-w-7xl mx-auto px-2.5 sm:px-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-base sm:text-lg font-black text-[#0F172A] dark:text-slate-100 leading-tight">
+                    أدوات ومعدات ميكانيكية وكهربائية
+                  </h2>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 font-medium">
+                    مثاقب، مناشير، ومعدات ورشات معتمدة بضمان رسمي
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setSelectedCategory('power_tools')}
+                  className="flex items-center gap-1 text-xs font-bold text-[#FF6B00] hover:text-[#E05E00] p-1 rounded-full hover:bg-[#FF6B00]/10 transition-colors"
+                >
+                  <span className="hidden sm:inline">المزيد</span>
+                  <ArrowLeft className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-none snap-x">
+                {powerToolsOnly.map((product) => {
+                  const prodName = product.name[language] || product.name.ar;
+                  const isAdded = addedItemIds[product.id];
+                  return (
+                    <div
+                      key={product.id}
+                      onClick={() => setSelectedProductId(product.id)}
+                      className="w-36 sm:w-44 shrink-0 snap-start bg-[#F8FAFC] dark:bg-[#1E293B] rounded-2xl border border-[#E2E8F0] dark:border-slate-800 hover:border-[#CBD5E1] dark:hover:border-slate-700 p-2 flex flex-col justify-between cursor-pointer group transition-all hover:shadow-md"
+                    >
+                      <div>
+                        <div className="aspect-square w-full bg-white dark:bg-[#0F172A] rounded-xl overflow-hidden p-2 flex items-center justify-center border border-[#F1F5F9] dark:border-slate-700/60">
+                          <img
+                            src={product.images[0] || '/assets/aistudio/file_0000000048188243bc0b721218c854fc_ea3ea21d.png'}
+                            alt={prodName}
+                            loading="lazy"
+                            className="w-full h-full object-contain group-hover:scale-105 transition-transform duration-300"
+                          />
+                        </div>
+
+                        <div className="pt-2">
+                          <span className="text-[10px] text-slate-500 dark:text-slate-400 font-semibold block truncate">
+                            {product.companyName}
+                          </span>
+                          <h3 className="text-xs font-bold text-[#0F172A] dark:text-slate-100 line-clamp-2 leading-tight group-hover:text-[#FF6B00] transition-colors min-h-[1.9rem] my-0.5">
+                            {prodName}
+                          </h3>
+                          <div className="flex items-center gap-1 text-[10px] text-slate-600 dark:text-slate-400 mb-1">
+                            <Star className="w-3 h-3 fill-amber-400 text-amber-400 shrink-0" />
+                            <span className="font-bold text-[#0F172A] dark:text-slate-200">{product.rating || '4.9'}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="pt-1.5 border-t border-[#E2E8F0] dark:border-slate-800 flex items-center justify-between gap-1">
+                        <div>
+                          <span className="text-xs sm:text-sm font-black text-[#FF6B00] font-mono block leading-none">
+                            {product.price.toFixed(3)}
+                          </span>
+                          <span className="text-[9px] text-slate-500 dark:text-slate-400 font-bold">{t.cart.currency}</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={(e) => handleQuickAdd(e, product)}
+                          className={`w-7 h-7 rounded-xl flex items-center justify-center transition-all cursor-pointer active:scale-95 ${
+                            isAdded ? 'bg-emerald-600 text-white' : 'bg-[#FF6B00] hover:bg-[#E05E00] text-white shadow-xs'
+                          }`}
+                        >
+                          {isAdded ? <Check className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          )}
+        </>
+      )}
+
+      {/* 5. شريط الفلترة واختيار الولاية التونسية */}
+      <section className="max-w-7xl mx-auto px-2.5 sm:px-4">
+        <div className="flex items-center justify-between gap-2 bg-[#F8FAFC] dark:bg-[#1E293B] border border-[#E2E8F0] dark:border-slate-800 p-2 sm:p-2.5 rounded-2xl">
+          <div className="flex items-center gap-1.5">
+            <span className="w-2.5 h-2.5 rounded-full bg-[#FF6B00]"></span>
+            <span className="text-xs font-bold text-[#0F172A] dark:text-slate-100">
+              كافة المعروضات ({filteredProducts.length})
+            </span>
           </div>
-        </div>
-      </section>
 
-      {/* 2. Flash Countdown Offer Banner */}
-      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="rounded-3xl bg-linear-to-r from-[#111827] via-[#1E293B] to-[#0B0F17] text-white p-6 sm:p-8 border border-slate-800 shadow-xl flex flex-col md:flex-row items-center justify-between gap-6">
-          <div className="flex items-center gap-4 text-center sm:text-start">
-            <div className="w-12 h-12 rounded-2xl bg-[#FF6B00] text-white flex items-center justify-center shrink-0 shadow-md">
-              <Timer className="w-6 h-6 animate-pulse" />
-            </div>
-            <div>
-              <span className="text-[11px] font-black text-[#FF6B00] uppercase tracking-wider block">
-                تخفيض حصري -20%
-              </span>
-              <h2 className="text-lg sm:text-xl font-black text-white">
-                {t.flashOffer.title}
-              </h2>
-            </div>
-          </div>
-
-          {/* Countdown Clock */}
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-slate-400 ml-2 hidden sm:inline">{t.flashOffer.endsIn}</span>
-            <div className="bg-slate-900/90 border border-slate-700 rounded-xl px-3 py-2 text-center min-w-12">
-              <span className="block text-base font-black text-[#FF6B00] tabular-nums font-mono">
-                {String(timeLeft.hours).padStart(2, '0')}
-              </span>
-              <span className="text-[10px] text-slate-400">{t.flashOffer.hours}</span>
-            </div>
-            <span className="text-slate-500 font-bold">:</span>
-            <div className="bg-slate-900/90 border border-slate-700 rounded-xl px-3 py-2 text-center min-w-12">
-              <span className="block text-base font-black text-[#FF6B00] tabular-nums font-mono">
-                {String(timeLeft.minutes).padStart(2, '0')}
-              </span>
-              <span className="text-[10px] text-slate-400">{t.flashOffer.minutes}</span>
-            </div>
-            <span className="text-slate-500 font-bold">:</span>
-            <div className="bg-slate-900/90 border border-slate-700 rounded-xl px-3 py-2 text-center min-w-12">
-              <span className="block text-base font-black text-[#FF6B00] tabular-nums font-mono">
-                {String(timeLeft.seconds).padStart(2, '0')}
-              </span>
-              <span className="text-[10px] text-slate-400">{t.flashOffer.seconds}</span>
-            </div>
-
-            <button
-              onClick={() => {
-                const prod = products.find(p => p.id === 'prod_titan_drill');
-                if (prod) setSelectedProductId(prod.id);
-              }}
-              className="mr-3 px-5 py-2.5 rounded-xl bg-[#FF6B00] hover:bg-[#e05e00] text-white font-bold text-xs shadow-md transition-colors whitespace-nowrap"
-            >
-              {t.flashOffer.shopOffer}
-            </button>
-          </div>
-        </div>
-      </section>
-
-      {/* 3. Four Core Purchase Benefits (Discipline: no pill boxes, clean icons) */}
-      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          
-          <div className="p-5 rounded-2xl bg-white border border-[#E8E4DD] shadow-xs space-y-2">
-            <div className="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-600 flex items-center justify-center">
-              <Banknote className="w-5 h-5" />
-            </div>
-            <h3 className="text-sm font-bold text-slate-900">{t.benefits.cod}</h3>
-            <p className="text-xs text-slate-500 leading-relaxed">{t.benefits.codDesc}</p>
-          </div>
-
-          <div className="p-5 rounded-2xl bg-white border border-[#E8E4DD] shadow-xs space-y-2">
-            <div className="w-10 h-10 rounded-xl bg-blue-500/10 text-blue-600 flex items-center justify-center">
-              <Truck className="w-5 h-5" />
-            </div>
-            <h3 className="text-sm font-bold text-slate-900">{t.benefits.fastDelivery}</h3>
-            <p className="text-xs text-slate-500 leading-relaxed">{t.benefits.fastDeliveryDesc}</p>
-          </div>
-
-          <div className="p-5 rounded-2xl bg-white border border-[#E8E4DD] shadow-xs space-y-2">
-            <div className="w-10 h-10 rounded-xl bg-[#FF6B00]/10 text-[#FF6B00] flex items-center justify-center">
-              <ShieldCheck className="w-5 h-5" />
-            </div>
-            <h3 className="text-sm font-bold text-slate-900">{t.benefits.genuine}</h3>
-            <p className="text-xs text-slate-500 leading-relaxed">{t.benefits.genuineDesc}</p>
-          </div>
-
-          <div className="p-5 rounded-2xl bg-white border border-[#E8E4DD] shadow-xs space-y-2">
-            <div className="w-10 h-10 rounded-xl bg-purple-500/10 text-purple-600 flex items-center justify-center">
-              <Headphones className="w-5 h-5" />
-            </div>
-            <h3 className="text-sm font-bold text-slate-900">{t.benefits.directSupport}</h3>
-            <p className="text-xs text-slate-500 leading-relaxed">{t.benefits.directSupportDesc}</p>
-          </div>
-
-        </div>
-      </section>
-
-      {/* 4. Catalog & Interactive Filter Controls */}
-      <section id="catalog" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6">
-        
-        {/* Header with Title and Governorate filter */}
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-[#E8E4DD] pb-4">
-          <div>
-            <h2 className="text-xl sm:text-2xl font-black text-slate-900">
-              تشكيلة المنتجات والقطع المعتمدة
-            </h2>
-            <p className="text-xs text-slate-500 mt-0.5">
-              عرض {filteredProducts.length} منتج متوفر مع الأسعار بالدينار التونسي (TND)
-            </p>
-          </div>
-
-          {/* Regional governorate filter */}
-          <div className="flex items-center gap-2 w-full sm:w-auto">
-            <MapPin className="w-4 h-4 text-[#FF6B00] shrink-0" />
+          <div className="flex items-center gap-1">
+            <MapPin className="w-3.5 h-3.5 text-[#FF6B00] shrink-0" />
             <select
               value={selectedGovFilter}
               onChange={e => setSelectedGovFilter(e.target.value)}
-              className="text-xs py-2 px-3 rounded-xl border border-slate-300 bg-white font-medium text-slate-800 focus:outline-hidden focus:border-[#FF6B00] w-full sm:w-auto shadow-2xs"
+              className="text-xs py-1 px-2.5 rounded-full border border-[#E2E8F0] dark:border-slate-700 bg-white dark:bg-[#0F172A] font-bold text-[#0F172A] dark:text-slate-100 focus:outline-none focus:border-[#FF6B00] cursor-pointer shadow-2xs"
             >
               <option value="all">كافة ولايات تونس (الكل)</option>
               {TUNISIAN_GOVERNORATES.map(gov => (
@@ -293,102 +436,79 @@ export const StorefrontView: React.FC = () => {
             </select>
           </div>
         </div>
+      </section>
 
-        {/* Categories Segmented Control Tabs */}
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-2 scrollbar-none">
-          {categories.map(cat => (
-            <button
-              key={cat.id}
-              onClick={() => setSelectedCategory(cat.id)}
-              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap shrink-0 ${
-                selectedCategory === cat.id
-                  ? 'bg-[#0B0F17] text-white shadow-xs'
-                  : 'bg-white text-slate-600 hover:text-slate-900 border border-[#E8E4DD] hover:border-slate-300'
-              }`}
-            >
-              {cat.label}
-            </button>
-          ))}
-        </div>
-
-        {/* Active search tag if searching */}
-        {searchQuery && (
-          <div className="flex items-center gap-2 text-xs text-slate-600 bg-white p-3 rounded-xl border border-slate-200">
-            <span>نتائج البحث عن: <strong className="text-slate-900">"{searchQuery}"</strong></span>
-            <span aria-hidden="true">·</span>
-            <span>({filteredProducts.length} نتائج)</span>
-          </div>
-        )}
-
-        {/* 5. Products Grid */}
+      {/* 6. شبكة المنتجات الكاملة في عمودين متجاورين (2-Column Grid on Mobile) */}
+      <main className="max-w-7xl mx-auto px-2.5 sm:px-4">
         {filteredProducts.length === 0 ? (
-          <div className="py-16 text-center bg-white rounded-3xl border border-[#E8E4DD] p-8 space-y-3">
-            <div className="w-14 h-14 rounded-full bg-slate-100 flex items-center justify-center mx-auto text-slate-400">
-              <Filter className="w-6 h-6" />
-            </div>
-            <h3 className="text-base font-bold text-slate-800">لا توجد منتجات مطابقة لهذا الفلتر</h3>
-            <p className="text-xs text-slate-500">جرب اختيار تصنيف آخر أو تفريغ شريط البحث</p>
+          <div className="py-12 text-center bg-[#F8FAFC] dark:bg-[#1E293B] rounded-3xl border border-[#E2E8F0] dark:border-slate-800 p-6 space-y-3">
+            <h3 className="text-sm font-bold text-[#0F172A] dark:text-slate-100">لا توجد منتجات مطابقة لبحثك أو الفلتر</h3>
+            <p className="text-xs text-slate-500 dark:text-slate-400">جرب اختيار تصنيف آخر أو تفريغ شريط البحث</p>
             <button
+              type="button"
               onClick={() => {
                 setSelectedCategory('all');
                 setSelectedGovFilter('all');
               }}
               className="text-xs font-bold text-[#FF6B00] hover:underline"
             >
-              إعادة ضبط الفلاتر
+              إعادة ضبط الفلاتر وعرض كافة المنتجات
             </button>
           </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 sm:gap-8">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2.5 sm:gap-3.5 lg:gap-5">
             {filteredProducts.map(product => (
               <ProductCard key={product.id} product={product} />
             ))}
           </div>
         )}
+      </main>
 
-      </section>
-
-      {/* 6. Partner Companies Strip */}
-      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6">
-        <div className="bg-[#FAF8F5] rounded-3xl border border-[#E8E4DD] p-8 space-y-6">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 border-b border-[#E8E4DD]/70 pb-4">
-            <div>
-              <h3 className="text-base font-bold text-slate-900">كبار الموزعين والشركات المعتمدة في تونس</h3>
-              <p className="text-xs text-slate-500">تزويد مباشر بأعلى معايير الجودة والمطابقة</p>
-            </div>
-            <button
-              onClick={() => {
-                setCurrentView('companies');
-                window.scrollTo({ top: 0, behavior: 'smooth' });
-              }}
-              className="text-xs font-bold text-[#FF6B00] hover:underline flex items-center gap-1"
-            >
-              <span>دليل الشركات كاملة</span>
-              <ChevronRight className="w-3.5 h-3.5" />
-            </button>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            {companies.map(comp => (
-              <div 
-                key={comp.id} 
-                onClick={() => {
-                  setCurrentView('companies');
-                  window.scrollTo({ top: 0, behavior: 'smooth' });
-                }}
-                className="p-4 bg-white rounded-2xl border border-slate-200 hover:border-[#FF6B00] cursor-pointer transition-all flex items-center gap-3.5"
-              >
-                <img 
-                  src={comp.logo} 
-                  alt={comp.name} 
-                  className="w-12 h-12 rounded-xl object-contain bg-slate-50 p-1 border border-slate-200" 
-                />
-                <div className="overflow-hidden">
-                  <h4 className="text-xs font-bold text-slate-900 truncate">{comp.name}</h4>
-                  <p className="text-[11px] text-slate-500 font-mono mt-0.5" dir="ltr">{comp.phone}</p>
-                </div>
+      {/* 7. شريط الثقة والمميزات (Trust Bar) */}
+      <section className="max-w-7xl mx-auto px-2.5 sm:px-4 pt-2">
+        <div className="rounded-3xl bg-[#F8FAFC] dark:bg-[#1E293B] border border-[#E2E8F0] dark:border-slate-800 p-3 sm:p-5">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5 sm:gap-4">
+            
+            <div className="flex items-center gap-2.5 p-2 bg-white dark:bg-[#0F172A] rounded-2xl border border-[#E2E8F0]/70 dark:border-slate-700/50">
+              <div className="w-8 h-8 rounded-xl bg-[#FF6B00]/10 text-[#FF6B00] flex items-center justify-center shrink-0">
+                <Truck className="w-4 h-4" />
               </div>
-            ))}
+              <div className="truncate">
+                <h4 className="text-xs font-bold text-[#0F172A] dark:text-slate-100 leading-tight">توصيل سريع</h4>
+                <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight">لكافة ولايات تونس الـ24</p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2.5 p-2 bg-white dark:bg-[#0F172A] rounded-2xl border border-[#E2E8F0]/70 dark:border-slate-700/50">
+              <div className="w-8 h-8 rounded-xl bg-emerald-500/10 text-emerald-600 flex items-center justify-center shrink-0">
+                <Banknote className="w-4 h-4" />
+              </div>
+              <div className="truncate">
+                <h4 className="text-xs font-bold text-[#0F172A] dark:text-slate-100 leading-tight">دفع عند الاستلام</h4>
+                <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight">عاين طلبيتك قبل الدفع</p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2.5 p-2 bg-white dark:bg-[#0F172A] rounded-2xl border border-[#E2E8F0]/70 dark:border-slate-700/50">
+              <div className="w-8 h-8 rounded-xl bg-[#FF6B00]/10 text-[#FF6B00] flex items-center justify-center shrink-0">
+                <ShieldCheck className="w-4 h-4" />
+              </div>
+              <div className="truncate">
+                <h4 className="text-xs font-bold text-[#0F172A] dark:text-slate-100 leading-tight">قطع ومعدات أصلية</h4>
+                <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight">ضمان جودة معتمد 100%</p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2.5 p-2 bg-white dark:bg-[#0F172A] rounded-2xl border border-[#E2E8F0]/70 dark:border-slate-700/50">
+              <div className="w-8 h-8 rounded-xl bg-blue-500/10 text-blue-600 flex items-center justify-center shrink-0">
+                <Headphones className="w-4 h-4" />
+              </div>
+              <div className="truncate">
+                <h4 className="text-xs font-bold text-[#0F172A] dark:text-slate-100 leading-tight">دعم وتتبع مباشر</h4>
+                <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight">خدمة هاتفية وواتساب</p>
+              </div>
+            </div>
+
           </div>
         </div>
       </section>

@@ -19,6 +19,7 @@ import OwnerSecurityRoom from './components/security/OwnerSecurityRoom';
 import { PromiseView, CompaniesView, ContactView } from './components/StaticPages';
 import { FloatingActions } from './components/FloatingActions';
 import { Footer } from './components/Footer';
+import { BottomNavigation } from './components/BottomNavigation';
 import { applySeo } from './lib/seo';
 
 const AppContent: React.FC = () => {
@@ -82,7 +83,7 @@ const AppContent: React.FC = () => {
     currentView === 'owner_dashboard';
 
   return (
-    <div className="min-h-screen flex flex-col bg-[#FAF8F5] text-slate-900 selection:bg-[#FF6B00] selection:text-white">
+    <div className="min-h-screen flex flex-col bg-white dark:bg-[#0B0F17] text-[#0F172A] dark:text-slate-100 selection:bg-[#FF6B00] selection:text-white transition-colors">
       {/* 1. Header with original logo and language controls */}
       <Header />
 
@@ -128,6 +129,9 @@ const AppContent: React.FC = () => {
 
       {/* 5. Footer */}
       <Footer />
+
+      {/* 6. Google Play Fixed Bottom Navigation Bar */}
+      {!isOwnerRoute && <BottomNavigation />}
     </div>
   );
 };

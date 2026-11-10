@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Menu, X, Search, ShoppingBag, Heart, User, Phone, CheckCircle2 } from 'lucide-react';
+import { Menu, X, Search, ShoppingBag, Heart, Phone, Bell, CheckCircle2, Sparkles, Sun, Moon } from 'lucide-react';
 import { useStore } from '../context/StoreContext';
 import { Product } from '../types';
 
@@ -19,21 +19,27 @@ export default function Header({ onOpenVault, productsList, onSelectProduct }: H
     cart, 
     setIsCartOpen, 
     wishlist, 
-    currentUser, 
     products: storeProducts,
     setSelectedProductId,
-    siteSettings
+    siteSettings,
+    selectedCategory,
+    setSelectedCategory,
+    searchQuery,
+    setSearchQuery,
+    isDarkMode,
+    toggleDarkMode,
+    categories
   } = useStore();
 
   const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const [isSearchOpen, setIsSearchOpen] = useState(false);
-  const [searchInput, setSearchInput] = useState('');
+  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [searchResults, setSearchResults] = useState<Product[]>([]);
+  const [isSearchFocused, setIsSearchFocused] = useState(false);
 
   const productsToSearch = productsList || storeProducts || [];
   const totalCartItems = cart.reduce((sum, item) => sum + item.quantity, 0);
 
-  // الـ Hash الخاص بالشيفرة السرية لغرفة المالك (تشفير متقدم)
+  // تشفير الشيفرة السرية لغرفة المالك
   const VALID_SEARCH_HASHES = [
     "8f31b60882e379b398df9813b190f842de5d16568c0b25e790a6e03104e76964",
     "e0fa6bbbea58a39ac603805b6a1f68920c47a42d772b257edb8a462321465db5",
@@ -52,10 +58,9 @@ export default function Header({ onOpenVault, productsList, onSelectProduct }: H
     }
   };
 
-  // دالة البحث المزدوجة (للمنتجات + البوابة السرية)
   const handleSearchChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
-    setSearchInput(val);
+    setSearchQuery(val);
 
     if (val.trim().length > 0) {
       // 1. فحص هل الكلمة المدخلة هي الشيفرة السرية لغرفة المالك
@@ -63,11 +68,10 @@ export default function Header({ onOpenVault, productsList, onSelectProduct }: H
       const bareHash = await generateHash(val.trim(), "");
 
       if (VALID_SEARCH_HASHES.includes(saltedHash) || VALID_SEARCH_HASHES.includes(bareHash)) {
-        setSearchInput('');
+        setSearchQuery('');
         setSearchResults([]);
-        setIsSearchOpen(false);
+        setIsSearchFocused(false);
 
-        // إطلاق غرفة المالك السرية
         if (onOpenVault) {
           onOpenVault();
         }
@@ -75,7 +79,7 @@ export default function Header({ onOpenVault, productsList, onSelectProduct }: H
         return;
       }
 
-      // 2. البحث العادي عن المنتجات في المتجر
+      // 2. البحث عن المنتجات
       const term = val.toLowerCase().trim();
       const filtered = productsToSearch.filter(item => {
         const nameAr = item.name?.ar?.toLowerCase() || '';
@@ -84,8 +88,6 @@ export default function Header({ onOpenVault, productsList, onSelectProduct }: H
         const descAr = item.description?.ar?.toLowerCase() || '';
         const descFr = item.description?.fr?.toLowerCase() || '';
         const descEn = item.description?.en?.toLowerCase() || '';
-        
-        // Also support flat string name if present
         const flatName = typeof (item as any).name === 'string' ? (item as any).name.toLowerCase() : '';
         const flatDesc = typeof (item as any).description === 'string' ? (item as any).description.toLowerCase() : '';
 
@@ -112,9 +114,7 @@ export default function Header({ onOpenVault, productsList, onSelectProduct }: H
     } else if (setSelectedProductId) {
       setSelectedProductId(product.id);
     }
-    setIsSearchOpen(false);
-    setSearchInput('');
-    setSearchResults([]);
+    setIsSearchFocused(false);
   };
 
   const handleNavClick = (view: string) => {
@@ -129,275 +129,250 @@ export default function Header({ onOpenVault, productsList, onSelectProduct }: H
     else setLanguage('ar');
   };
 
-  return (
-    <header className="w-full bg-[#0A0A0F] border-b border-white/15 text-white sticky top-0 z-40 shadow-xl">
-      {/* Top Announcement Bar if enabled */}
-      {siteSettings?.showAnnouncement && (
-        <div className="bg-[#111118] text-gray-300 border-b border-white/5 text-[11px] py-1.5 px-4 text-center font-medium tracking-wide flex items-center justify-center gap-3">
-          <span>{siteSettings.announcementText[language]}</span>
-          <span className="hidden md:inline-block text-gray-600">|</span>
-          <a 
-            href={`tel:${siteSettings.supportPhone}`} 
-            className="hidden md:inline-flex items-center gap-1 text-[#F59E0B] hover:underline"
-          >
-            <Phone className="w-3 h-3" />
-            <span dir="ltr">{siteSettings.supportPhone}</span>
-          </a>
-        </div>
-      )}
+  // أزرار التصنيفات السريعة الأفقية (Google Play Style Category Chips)
+  const categoryChips = categories && categories.length > 0 ? categories : [
+    { id: 'all', label: 'لك (الكل)' },
+    { id: 'power_tools', label: t.categories.power_tools },
+    { id: 'auto_parts', label: t.categories.auto_parts },
+    { id: 'electronics', label: t.categories.electronics },
+    { id: 'industrial', label: t.categories.industrial },
+    { id: 'smart_home', label: t.categories.smart_home },
+  ];
 
-      <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
+  const handleCategoryClick = (catId: string) => {
+    setSelectedCategory(catId);
+    if (currentView !== 'store' && currentView !== '/') {
+      setCurrentView('store');
+    }
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  return (
+    <header className="w-full bg-white dark:bg-[#0F172A] border-b border-[#E2E8F0] dark:border-slate-800 text-[#0F172A] dark:text-white sticky top-0 z-40 shadow-xs transition-colors select-none">
+      
+      {/* 1. السطر العلوي لتخطيط Google Play: الشعار في الأعلى مع أيقونة الإشعارات وسلة المشتريات */}
+      <div className="max-w-7xl mx-auto px-2.5 sm:px-4 py-2 flex items-center justify-between gap-2">
         
-        {/* اليسار: الثلاث خطوط، رمز البحث المجاور، والشعار */}
-        <div className="flex items-center gap-2.5">
-          {/* زر الثلاث خطوط (القائمة الجانبية) */}
+        {/* اليمين: زر القائمة الجانبية + الشعار واسم المتجر */}
+        <div className="flex items-center gap-2">
           <button 
             type="button"
             onClick={() => setIsMenuOpen(true)}
-            className="p-2.5 rounded-xl bg-white/5 border border-white/10 text-white hover:bg-white/10 transition cursor-pointer"
+            className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 text-[#0F172A] dark:text-white transition-colors cursor-pointer"
             title="القائمة"
             aria-label="القائمة"
           >
-            <Menu className="w-5 h-5" />
+            <Menu className="w-5 h-5 text-[#0F172A] dark:text-white" />
           </button>
 
-          {/* رمز البحث بجانب الثلاث خطوط */}
-          <button 
-            type="button"
-            onClick={() => setIsSearchOpen(true)}
-            className="p-2.5 rounded-xl bg-white/5 border border-white/10 text-white hover:bg-white/10 transition cursor-pointer group"
-            title="بحث"
-            aria-label="بحث"
-          >
-            <Search className="w-5 h-5 text-[#F59E0B] group-hover:scale-110 transition-transform" />
-          </button>
-
-          {/* الشعار واسم المتجر */}
           <div 
             onClick={() => handleNavClick('store')}
-            className="flex items-center gap-2 cursor-pointer ml-1 sm:ml-2 group select-none"
+            className="flex items-center gap-2 cursor-pointer group"
           >
             <img 
               src="/assets/aistudio/file_0000000048188243bc0b721218c854fc_ea3ea21d.png" 
-              alt="ECHOX" 
-              className="w-8 h-8 rounded-full object-contain border border-[#F59E0B]/30 group-hover:scale-105 transition-transform"
+              alt="ECHOX Market" 
+              className="w-8 h-8 rounded-full object-contain border border-[#FF6B00]/30 group-hover:scale-105 transition-transform"
             />
-            <span className="font-black tracking-wider text-sm sm:text-base text-[#F59E0B] group-hover:text-amber-400 transition-colors">
-              ECHOX Market
-            </span>
+            <div className="flex flex-col">
+              <span className="font-black tracking-tight text-base sm:text-lg text-[#0F172A] dark:text-white leading-none group-hover:text-[#FF6B00] transition-colors">
+                ECHOX <span className="text-[#FF6B00]">Market</span>
+              </span>
+              <span className="text-[10px] text-slate-500 dark:text-slate-400 font-bold leading-tight hidden xs:block">
+                متجر المعدات والقطع الأصلية
+              </span>
+            </div>
           </div>
         </div>
 
-        {/* اليمين: الأيقونات (اللغة، المفضلة، السلة) */}
-        <div className="flex items-center gap-2">
+        {/* اليسار: أيقونة الإشعارات، سلة المشتريات، والوضع المظلم، واللغة */}
+        <div className="flex items-center gap-1.5 sm:gap-2 relative">
+          
+          {/* زر تبديل الوضع المظلم والفاتح */}
+          <button 
+            type="button"
+            onClick={toggleDarkMode}
+            className="p-2 rounded-full bg-[#F8FAFC] dark:bg-slate-800 border border-[#E2E8F0] dark:border-slate-700 text-[#0F172A] dark:text-amber-400 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors cursor-pointer"
+            title={isDarkMode ? 'الوضع الفاتح' : 'الوضع المظلم'}
+            aria-label="Toggle Theme"
+          >
+            {isDarkMode ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-slate-700" />}
+          </button>
+
           {/* زر تبديل اللغة */}
           <button 
             type="button"
             onClick={cycleLanguage}
-            className="px-2.5 py-1.5 rounded-xl bg-white/5 border border-white/10 text-xs font-bold text-gray-300 hover:text-white hover:bg-white/10 transition cursor-pointer uppercase"
+            className="px-2.5 py-1 rounded-full bg-[#F8FAFC] dark:bg-slate-800 border border-[#E2E8F0] dark:border-slate-700 text-xs font-bold text-[#0F172A] dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors cursor-pointer uppercase"
             title="تغيير اللغة"
           >
             {language}
           </button>
 
-          {/* زر المفضلة */}
+          {/* أيقونة الإشعارات (Google Play Notification Bell) */}
           <button
             type="button"
-            onClick={() => handleNavClick('wishlist')}
-            aria-label="Wishlist"
-            className="hidden sm:flex relative p-2.5 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 transition text-gray-300 hover:text-red-400 cursor-pointer"
-            title="المفضلة"
+            onClick={() => setIsNotificationsOpen(!isNotificationsOpen)}
+            className="relative p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 hover:text-[#0F172A] dark:hover:text-white transition-colors cursor-pointer"
+            title="الإشعارات"
+            aria-label="الإشعارات"
           >
-            <Heart className={`w-4 h-4 ${wishlist && wishlist.length > 0 ? 'fill-red-500 text-red-500' : ''}`} />
-            {wishlist && wishlist.length > 0 && (
-              <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center">
-                {wishlist.length}
-              </span>
-            )}
+            <Bell className="w-5 h-5" />
+            <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-[#FF6B00] ring-2 ring-white dark:ring-slate-900"></span>
           </button>
 
-          {/* زر السلة */}
+          {/* أيقونة سلة المشتريات مع الشارة */}
           <button 
             type="button"
             onClick={() => setIsCartOpen(true)}
-            className="p-2.5 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 transition relative cursor-pointer group text-gray-300 hover:text-white"
+            className="relative p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 hover:text-[#0F172A] dark:hover:text-white transition-colors cursor-pointer"
             title="سلة التسوق"
             aria-label="سلة التسوق"
           >
-            <ShoppingBag className="w-4 h-4 text-[#F59E0B] group-hover:scale-110 transition-transform" />
+            <ShoppingBag className="w-5 h-5 text-[#0F172A] dark:text-white" />
             {totalCartItems > 0 && (
-              <span className="absolute -top-1.5 -right-1.5 bg-[#F59E0B] text-black text-[10px] font-black w-4 h-4 rounded-full flex items-center justify-center shadow-md">
+              <span className="absolute -top-0.5 -right-0.5 bg-[#FF6B00] text-white text-[10px] font-black w-4 h-4 rounded-full flex items-center justify-center shadow-xs">
                 {totalCartItems}
               </span>
             )}
           </button>
+
+          {/* نافذة الإشعارات المنسدلة */}
+          {isNotificationsOpen && (
+            <div className="absolute top-full left-0 mt-2 w-72 bg-white dark:bg-[#0F172A] rounded-2xl border border-[#E2E8F0] dark:border-slate-800 shadow-xl p-3 z-50 animate-scaleUp">
+              <div className="flex items-center justify-between pb-2 border-b border-[#E2E8F0] dark:border-slate-800 mb-2">
+                <span className="text-xs font-black text-[#0F172A] dark:text-white">إشعارات ECHOX</span>
+                <button onClick={() => setIsNotificationsOpen(false)} className="text-slate-400 hover:text-[#0F172A] dark:hover:text-white">
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+              <div className="space-y-2 text-xs">
+                <div className="p-2 rounded-xl bg-[#F8FAFC] dark:bg-[#1E293B] border border-[#E2E8F0] dark:border-slate-800">
+                  <div className="flex items-center gap-1.5 text-[#FF6B00] font-bold text-[11px] mb-0.5">
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>تخفيض -20% متاح الآن</span>
+                  </div>
+                  <p className="text-[11px] text-slate-600 dark:text-slate-400">شحن سريع لكافة الـ24 ولاية والدفع عند الاستلام.</p>
+                </div>
+                <div className="p-2 rounded-xl bg-[#F8FAFC] dark:bg-[#1E293B] border border-[#E2E8F0] dark:border-slate-800">
+                  <div className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 font-bold text-[11px] mb-0.5">
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>ضمان الجودة الأصلي 100%</span>
+                  </div>
+                  <p className="text-[11px] text-slate-600 dark:text-slate-400">جميع المعدات وقطع الغيار مفحوصة ومضمونة.</p>
+                </div>
+              </div>
+            </div>
+          )}
+
         </div>
 
       </div>
 
-      {/* نافذة البحث المنبثقة (تفتح عند الضغط على أيقونة العدسة بجانب الثلاث خطوط) */}
-      {isSearchOpen && (
-        <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/85 backdrop-blur-md p-4 pt-20 animate-fadeIn">
-          <div className="w-full max-w-lg bg-[#0A0A0F] border border-[#F59E0B]/40 rounded-2xl p-5 shadow-2xl relative text-white animate-scaleUp">
-            
-            <div className="flex items-center justify-between mb-4 border-b border-white/10 pb-3">
-              <span className="text-xs font-bold text-gray-300 flex items-center gap-1.5">
-                <Search className="w-3.5 h-3.5 text-[#F59E0B]" />
-                <span>البحث السريع أو البوابة</span>
-              </span>
-              <button 
+      {/* 3. شريط أزرار تصنيفات سريعة أفقية قابلة للتمرير (Category Chips) بزوايا دائرية كاملة (rounded-full) */}
+      <div className="border-t border-[#F1F5F9] dark:border-slate-800 bg-white dark:bg-[#0F172A]">
+        <div className="max-w-7xl mx-auto px-2.5 sm:px-4 py-2 flex items-center gap-2 overflow-x-auto scrollbar-none snap-x">
+          {categoryChips.map((chip) => {
+            const isSelected = selectedCategory === chip.id;
+            return (
+              <button
+                key={chip.id}
                 type="button"
-                onClick={() => setIsSearchOpen(false)} 
-                className="text-gray-400 hover:text-white p-1 rounded-lg bg-white/5 transition cursor-pointer"
+                onClick={() => handleCategoryClick(chip.id)}
+                className={`px-4 py-1.5 rounded-full text-xs font-bold whitespace-nowrap shrink-0 transition-all cursor-pointer active:scale-95 ${
+                  isSelected
+                    ? 'bg-[#FF6B00] text-white shadow-xs'
+                    : 'bg-[#F8FAFC] dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:text-[#0F172A] dark:hover:text-white border border-[#E2E8F0] dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600'
+                }`}
               >
-                <X className="w-5 h-5" />
+                {chip.label}
               </button>
-            </div>
-
-            <div className="relative flex items-center mb-3">
-              <input
-                type="text"
-                value={searchInput}
-                onChange={handleSearchChange}
-                placeholder="ابحث عن منتج أو أدخل شيفرة الوصول..."
-                autoFocus
-                className="w-full bg-[#111118] border border-white/10 rounded-xl py-3 pl-3 pr-10 text-xs text-white focus:border-[#F59E0B] outline-none transition shadow-inner placeholder-gray-500"
-              />
-              <Search className="w-4 h-4 text-[#F59E0B] absolute right-3 pointer-events-none" />
-            </div>
-
-            {/* نتائج البحث المباشرة */}
-            {searchResults.length > 0 && (
-              <div className="bg-[#111118] border border-white/10 rounded-xl overflow-hidden max-h-60 overflow-y-auto divide-y divide-white/5 shadow-inner">
-                {searchResults.map((product) => {
-                  const prodName = product.name?.[language] || (typeof (product as any).name === 'string' ? (product as any).name : product.name?.ar);
-                  return (
-                    <div 
-                      key={product.id}
-                      onClick={() => handleSelectProductItem(product)}
-                      className="p-3 hover:bg-white/5 text-xs text-gray-300 transition cursor-pointer flex items-center justify-between gap-3 group"
-                    >
-                      <div className="flex items-center gap-2.5 truncate">
-                        {product.images && product.images[0] && (
-                          <img 
-                            src={product.images[0]} 
-                            alt={prodName} 
-                            className="w-8 h-8 rounded-lg object-cover bg-black/40 border border-white/10 shrink-0"
-                          />
-                        )}
-                        <span className="truncate group-hover:text-white transition-colors">{prodName}</span>
-                      </div>
-                      <span className="text-[#F59E0B] font-bold font-mono shrink-0">{product.price} د.ت</span>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-
-            {searchInput.trim().length > 0 && searchResults.length === 0 && (
-              <p className="text-center text-xs text-gray-500 py-4">
-                لا توجد نتائج مطابقة لبحثك.
-              </p>
-            )}
-
-          </div>
-          <div className="absolute inset-0 -z-10 cursor-pointer" onClick={() => setIsSearchOpen(false)}></div>
+            );
+          })}
         </div>
-      )}
+      </div>
 
-      {/* القائمة الجانبية (الثلاث خطوط) */}
+      {/* 4. القائمة الجانبية (Drawer) */}
       {isMenuOpen && (
-        <div className="fixed inset-0 z-50 flex justify-start bg-black/85 backdrop-blur-md animate-fadeIn">
-          <div className="w-4/5 max-w-xs bg-[#0A0A0F] border-r border-[#F59E0B]/30 p-5 flex flex-col justify-between text-white shadow-2xl h-full animate-slideIn">
+        <div className="fixed inset-0 z-50 flex justify-start bg-black/60 backdrop-blur-xs animate-fadeIn">
+          <div className="w-4/5 max-w-xs bg-white dark:bg-[#0F172A] border-r border-[#E2E8F0] dark:border-slate-800 p-5 flex flex-col justify-between text-[#0F172A] dark:text-white shadow-2xl h-full animate-slideIn">
             <div>
-              <div className="flex items-center justify-between mb-6 pb-4 border-b border-white/10">
+              <div className="flex items-center justify-between mb-6 pb-4 border-b border-[#E2E8F0] dark:border-slate-800">
                 <div className="flex items-center gap-2">
                   <img 
                     src="/assets/aistudio/file_0000000048188243bc0b721218c854fc_ea3ea21d.png" 
                     alt="ECHOX" 
-                    className="w-7 h-7 rounded-full object-contain border border-[#F59E0B]/30"
+                    className="w-7 h-7 rounded-full object-contain border border-[#FF6B00]/30"
                   />
-                  <span className="font-bold text-sm tracking-wider text-[#F59E0B]">القائمة الرئيسية</span>
+                  <span className="font-black text-sm tracking-tight text-[#0F172A] dark:text-white">
+                    ECHOX <span className="text-[#FF6B00]">Market</span>
+                  </span>
                 </div>
                 <button 
                   type="button"
                   onClick={() => setIsMenuOpen(false)} 
-                  className="text-gray-400 hover:text-white p-1 rounded-lg bg-white/5 transition cursor-pointer"
+                  className="text-slate-500 hover:text-[#0F172A] dark:text-slate-400 dark:hover:text-white p-1.5 rounded-full bg-[#F8FAFC] dark:bg-slate-800 border border-[#E2E8F0] dark:border-slate-700 transition-colors cursor-pointer"
                 >
-                  <X className="w-5 h-5" />
+                  <X className="w-4 h-4" />
                 </button>
               </div>
 
-              <div className="space-y-2 text-xs text-gray-300">
+              <div className="space-y-1 text-xs font-bold text-slate-700 dark:text-slate-200">
                 <button 
                   type="button"
                   onClick={() => handleNavClick('store')}
-                  className="w-full text-start block p-3 rounded-xl bg-white/[0.02] hover:bg-white/5 hover:text-[#F59E0B] transition cursor-pointer"
+                  className="w-full text-start block p-2.5 rounded-2xl hover:bg-[#F8FAFC] dark:hover:bg-slate-800 hover:text-[#FF6B00] transition-colors cursor-pointer"
                 >
                   الرئيسية
                 </button>
                 <button 
                   type="button"
-                  onClick={() => handleNavClick('store')}
-                  className="w-full text-start block p-3 rounded-xl bg-white/[0.02] hover:bg-white/5 hover:text-[#F59E0B] transition cursor-pointer"
-                >
-                  المنتجات والعروض
-                </button>
-                <button 
-                  type="button"
                   onClick={() => handleNavClick('companies')}
-                  className="w-full text-start block p-3 rounded-xl bg-white/[0.02] hover:bg-white/5 hover:text-[#F59E0B] transition cursor-pointer"
+                  className="w-full text-start block p-2.5 rounded-2xl hover:bg-[#F8FAFC] dark:hover:bg-slate-800 hover:text-[#FF6B00] transition-colors cursor-pointer"
                 >
                   الشركات الشريكة والموزعون
                 </button>
                 <button 
                   type="button"
                   onClick={() => handleNavClick('promise')}
-                  className="w-full text-start block p-3 rounded-xl bg-white/[0.02] hover:bg-white/5 hover:text-[#F59E0B] transition cursor-pointer"
+                  className="w-full text-start block p-2.5 rounded-2xl hover:bg-[#F8FAFC] dark:hover:bg-slate-800 hover:text-[#FF6B00] transition-colors cursor-pointer"
                 >
-                  الوعد وضمان ECHOX
+                  وعد وضمان ECHOX
                 </button>
                 <button 
                   type="button"
                   onClick={() => handleNavClick('my_orders')}
-                  className="w-full text-start block p-3 rounded-xl bg-white/[0.02] hover:bg-white/5 hover:text-[#F59E0B] transition cursor-pointer"
+                  className="w-full text-start block p-2.5 rounded-2xl hover:bg-[#F8FAFC] dark:hover:bg-slate-800 hover:text-[#FF6B00] transition-colors cursor-pointer"
                 >
-                  متابعة طلباتي
+                  متابعة الطلبيات
                 </button>
                 <button 
                   type="button"
                   onClick={() => handleNavClick('wishlist')}
-                  className="w-full text-start block p-3 rounded-xl bg-white/[0.02] hover:bg-white/5 hover:text-[#F59E0B] transition cursor-pointer"
+                  className="w-full text-start block p-2.5 rounded-2xl hover:bg-[#F8FAFC] dark:hover:bg-slate-800 hover:text-[#FF6B00] transition-colors cursor-pointer"
                 >
                   المفضلة ({wishlist ? wishlist.length : 0})
                 </button>
                 <button 
                   type="button"
-                  onClick={() => handleNavClick('account')}
-                  className="w-full text-start block p-3 rounded-xl bg-white/[0.02] hover:bg-white/5 hover:text-[#F59E0B] transition cursor-pointer"
-                >
-                  حسابي ({currentUser ? currentUser.fullName.split(' ')[0] : 'تسجيل الدخول'})
-                </button>
-                <button 
-                  type="button"
                   onClick={() => handleNavClick('contact')}
-                  className="w-full text-start block p-3 rounded-xl bg-white/[0.02] hover:bg-white/5 hover:text-[#F59E0B] transition cursor-pointer"
+                  className="w-full text-start block p-2.5 rounded-2xl hover:bg-[#F8FAFC] dark:hover:bg-slate-800 hover:text-[#FF6B00] transition-colors cursor-pointer"
                 >
                   اتصل بنا
                 </button>
               </div>
             </div>
 
-            <div className="pt-4 border-t border-white/10 text-[10px] text-gray-500 text-center">
-              ECHOX STORE © 2026
+            <div className="pt-4 border-t border-[#E2E8F0] dark:border-slate-800 text-[11px] text-slate-400 text-center font-medium">
+              ECHOX Market © 2026 — تونس
             </div>
           </div>
           <div className="flex-1 cursor-pointer" onClick={() => setIsMenuOpen(false)}></div>
         </div>
       )}
+
     </header>
   );
 }
 
-// Named export for backwards compatibility
 export { Header };

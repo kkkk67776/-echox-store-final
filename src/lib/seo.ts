@@ -1,5 +1,8 @@
 // Per-page SEO: title, description, canonical URL and robots directives.
-export const SITE_URL = 'https://echox-store.netlify.app';
+export const SITE_URL =
+  typeof window !== 'undefined' && window.location.origin && !window.location.origin.includes('localhost')
+    ? window.location.origin
+    : 'https://gen-lang-client-0499444627.web.app';
 
 interface PageMeta { path: string; title: string; description: string; index: boolean }
 

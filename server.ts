@@ -20,6 +20,30 @@ const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
 app.use(express.json());
 
+// Google Search Console HTML file verification handler
+app.get('/google:id.html', (req: Request, res: Response) => {
+  res.setHeader('Content-Type', 'text/html');
+  res.send(`google-site-verification: google${req.params.id}.html`);
+});
+
+// Search Engine Optimization: robots.txt and sitemap.xml
+app.get('/robots.txt', (_req: Request, res: Response) => {
+  res.setHeader('Content-Type', 'text/plain');
+  res.send(`User-agent: *
+Allow: /
+Sitemap: https://ais-pre-h73tzqybodmt5v2ji4xgqc-519756359948.europe-west2.run.app/sitemap.xml
+`);
+});
+
+app.get('/sitemap.xml', (_req: Request, res: Response) => {
+  const sitemapPath = path.resolve(process.cwd(), 'public', 'sitemap.xml');
+  if (fs.existsSync(sitemapPath)) {
+    res.setHeader('Content-Type', 'application/xml');
+    return res.sendFile(sitemapPath);
+  }
+  res.status(404).send('Not found');
+});
+
 // Sovereign Security Config
 const OWNER_EMAIL = 'abdelkaderbahri570@gmail.com';
 const OWNER_PHONE_E164 = '+21621511162';

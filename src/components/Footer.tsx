@@ -4,8 +4,7 @@ import {
   Phone, 
   Mail, 
   MapPin, 
-  ShieldCheck, 
-  Truck 
+  Truck
 } from 'lucide-react';
 
 export const Footer: React.FC = () => {
@@ -17,138 +16,174 @@ export const Footer: React.FC = () => {
   };
 
   return (
-    <footer className="bg-[#0B0F17] text-white border-t border-slate-800 transition-colors">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 lg:py-16">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-8 lg:gap-12">
+    <footer className="bg-[#0F172A] text-white border-t border-slate-800 transition-colors">
+      <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-8 sm:py-12">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 sm:gap-8">
           
-          {/* Brand Info (2 cols) */}
-          <div className="lg:col-span-2 space-y-4">
-            <div className="flex items-center gap-3">
+          {/* 1. معلومات المتجر والعلامة */}
+          <div className="space-y-3">
+            <div className="flex items-center gap-2.5">
               <img 
                 src="/assets/aistudio/file_0000000048188243bc0b721218c854fc_ea3ea21d.png" 
                 alt="ECHOX Logo" 
-                className="w-10 h-10 rounded-full object-contain"
+                className="w-8 h-8 rounded-full object-contain border border-[#FF6B00]/40"
               />
               <div>
-                <span className="text-xl font-black tracking-wider text-white">ECHOX STORE</span>
-                <span className="block text-[11px] text-[#FF6B00] font-bold">المنصة التونسية المعتمدة</span>
+                <span className="text-lg font-black tracking-tight text-white block leading-none">
+                  ECHOX <span className="text-[#FF6B00]">Market</span>
+                </span>
+                <span className="text-[10px] text-slate-400 font-bold">المنصة التونسية المعتمدة</span>
               </div>
             </div>
 
-            <p className="text-xs text-slate-400 leading-relaxed max-w-sm">
-              {t.footer.desc}
+            <p className="text-xs text-slate-300 leading-relaxed">
+              متجر إلكتروني تونسي متخصص في توفير المعدات والأجهزة الصناعية وقطع الغيار الأصلية مع الدفع عند الاستلام والتوصيل لكافة ولايات تونس الـ24.
             </p>
 
-            <div className="p-3.5 bg-slate-900/80 rounded-2xl border border-slate-800 text-xs flex items-center gap-3">
-              <Truck className="w-5 h-5 text-[#FF6B00] shrink-0" />
-              <span className="text-slate-300 font-semibold">{t.footer.deliveryAllTunisia}</span>
+            <div className="p-2.5 bg-slate-800/80 rounded-xl border border-slate-700 text-xs flex items-center gap-2 text-slate-200">
+              <Truck className="w-4 h-4 text-[#FF6B00] shrink-0" />
+              <span className="font-semibold text-[11px]">شحن سريع وتوصيل لجميع الـ 24 ولاية</span>
             </div>
           </div>
 
-          {/* Quick Links */}
-          <div className="space-y-3">
-            <h4 className="text-xs font-bold text-[#FF6B00] uppercase tracking-wider">
+          {/* 2. روابط التصفح السريعة */}
+          <div className="space-y-2.5">
+            <h4 className="text-xs font-black text-[#FF6B00] uppercase tracking-wider">
               {t.footer.quickLinks}
             </h4>
-            <ul className="space-y-2 text-xs text-slate-400 font-medium">
+            <ul className="space-y-1.5 text-xs text-slate-300 font-medium">
               <li>
-                <button onClick={() => handleLinkClick('store')} className="hover:text-white transition-colors">
+                <button 
+                  type="button"
+                  onClick={() => handleLinkClick('store')} 
+                  className="hover:text-[#FF6B00] transition-colors cursor-pointer text-start"
+                >
                   {t.nav.store}
                 </button>
               </li>
               <li>
-                <button onClick={() => handleLinkClick('promise')} className="hover:text-white transition-colors">
-                  {t.nav.promise}
-                </button>
-              </li>
-              <li>
-                <button onClick={() => handleLinkClick('companies')} className="hover:text-white transition-colors">
+                <button 
+                  type="button"
+                  onClick={() => handleLinkClick('companies')} 
+                  className="hover:text-[#FF6B00] transition-colors cursor-pointer text-start"
+                >
                   {t.nav.companies}
                 </button>
               </li>
               <li>
-                <button onClick={() => handleLinkClick('my_orders')} className="hover:text-white transition-colors">
-                  {t.nav.myOrders}
+                <button 
+                  type="button"
+                  onClick={() => handleLinkClick('promise')} 
+                  className="hover:text-[#FF6B00] transition-colors cursor-pointer text-start"
+                >
+                  {t.nav.promise}
                 </button>
               </li>
               <li>
-                <button onClick={() => handleLinkClick('account')} className="hover:text-white transition-colors">
-                  {t.nav.account}
+                <button 
+                  type="button"
+                  onClick={() => handleLinkClick('my_orders')} 
+                  className="hover:text-[#FF6B00] transition-colors cursor-pointer text-start"
+                >
+                  {t.nav.myOrders}
                 </button>
               </li>
             </ul>
           </div>
 
-          {/* Customer Service & Policies */}
-          <div className="space-y-3">
-            <h4 className="text-xs font-bold text-[#FF6B00] uppercase tracking-wider">
+          {/* 3. خدمة العملاء والضمان */}
+          <div className="space-y-2.5">
+            <h4 className="text-xs font-black text-[#FF6B00] uppercase tracking-wider">
               {t.footer.customerService}
             </h4>
-            <ul className="space-y-2 text-xs text-slate-400 font-medium">
+            <ul className="space-y-1.5 text-xs text-slate-300 font-medium">
               <li>
-                <button onClick={() => handleLinkClick('contact')} className="hover:text-white transition-colors">
+                <button 
+                  type="button"
+                  onClick={() => handleLinkClick('contact')} 
+                  className="hover:text-[#FF6B00] transition-colors cursor-pointer text-start"
+                >
                   {t.contactModal.title}
                 </button>
               </li>
               <li>
-                <button onClick={() => handleLinkClick('promise')} className="hover:text-white transition-colors">
+                <button 
+                  type="button"
+                  onClick={() => handleLinkClick('promise')} 
+                  className="hover:text-[#FF6B00] transition-colors cursor-pointer text-start"
+                >
                   {t.footer.returnPolicy}
                 </button>
               </li>
               <li>
-                <button onClick={() => handleLinkClick('promise')} className="hover:text-white transition-colors">
+                <button 
+                  type="button"
+                  onClick={() => handleLinkClick('promise')} 
+                  className="hover:text-[#FF6B00] transition-colors cursor-pointer text-start"
+                >
                   {t.footer.privacyPolicy}
                 </button>
               </li>
               <li>
-                <button onClick={() => handleLinkClick('promise')} className="hover:text-white transition-colors">
+                <button 
+                  type="button"
+                  onClick={() => handleLinkClick('promise')} 
+                  className="hover:text-[#FF6B00] transition-colors cursor-pointer text-start"
+                >
                   {t.footer.termsOfService}
                 </button>
               </li>
             </ul>
           </div>
 
-          {/* Contact Details */}
-          <div className="space-y-3">
-            <h4 className="text-xs font-bold text-[#FF6B00] uppercase tracking-wider">
-              التواصل والمقر
+          {/* 4. معلومات التواصل الرسمية */}
+          <div className="space-y-2.5">
+            <h4 className="text-xs font-black text-[#FF6B00] uppercase tracking-wider">
+              التواصل المباشر
             </h4>
-            <ul className="space-y-2 text-xs text-slate-400">
-              <li className="flex items-center gap-2">
-                <Phone className="w-3.5 h-3.5 text-[#FF6B00]" />
-                <span dir="ltr" className="text-white font-mono font-bold">{siteSettings.supportPhone}</span>
-              </li>
-              <li className="flex items-center gap-2">
-                <a 
-                  href={`https://wa.me/${siteSettings.whatsappPhone}?text=مرحباً%20ECHOX%20STORE%20تونس`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="flex items-center gap-2 text-[#25D366] hover:underline"
-                >
+            <ul className="space-y-2 text-xs text-slate-300 font-medium">
+              {siteSettings?.supportPhone && (
+                <li className="flex items-center gap-2">
+                  <Phone className="w-3.5 h-3.5 text-[#FF6B00]" />
+                  <a href={`tel:${siteSettings.supportPhone}`} dir="ltr" className="font-mono font-bold hover:text-white transition-colors">
+                    {siteSettings.supportPhone}
+                  </a>
+                </li>
+              )}
+              {siteSettings?.whatsappPhone && (
+                <li className="flex items-center gap-2">
                   <span className="w-2 h-2 rounded-full bg-[#25D366] animate-pulse"></span>
-                  <span className="text-xs font-bold">واتساب:</span>
-                  <span dir="ltr" className="font-mono font-bold text-white">+{siteSettings.whatsappPhone}</span>
-                </a>
-              </li>
-              <li className="flex items-center gap-2">
-                <Mail className="w-3.5 h-3.5 text-[#FF6B00]" />
-                <span dir="ltr" className="text-slate-300">{siteSettings.officialEmail}</span>
-              </li>
-              <li className="flex items-start gap-2">
-                <MapPin className="w-3.5 h-3.5 text-[#FF6B00] shrink-0 mt-0.5" />
-                <span className="text-slate-300">{siteSettings.address}</span>
-              </li>
-              <li className="pt-2 text-[11px] text-slate-500">
-                {siteSettings.workingHours[language]}
-              </li>
+                  <a 
+                    href={`https://wa.me/${siteSettings.whatsappPhone}?text=مرحباً%20ECHOX%20Market%20تونس`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-[#25D366] hover:underline flex items-center gap-1 font-bold"
+                  >
+                    <span>واتساب:</span>
+                    <span dir="ltr">+{siteSettings.whatsappPhone}</span>
+                  </a>
+                </li>
+              )}
+              {siteSettings?.officialEmail && (
+                <li className="flex items-center gap-2">
+                  <Mail className="w-3.5 h-3.5 text-[#FF6B00]" />
+                  <span dir="ltr" className="text-slate-300 text-[11px] truncate">{siteSettings.officialEmail}</span>
+                </li>
+              )}
+              {siteSettings?.address && (
+                <li className="flex items-start gap-2">
+                  <MapPin className="w-3.5 h-3.5 text-[#FF6B00] shrink-0 mt-0.5" />
+                  <span className="text-slate-300 text-[11px]">{siteSettings.address}</span>
+                </li>
+              )}
             </ul>
           </div>
 
         </div>
 
-        {/* Bottom Strip */}
-        <div className="pt-8 mt-8 border-t border-slate-800/80 flex flex-col sm:flex-row items-center justify-center text-center gap-4 text-xs text-slate-500">
-          <p>{t.footer.rights}</p>
+        {/* حقوق المتجر بدون أي روابط إدارية */}
+        <div className="pt-6 mt-6 border-t border-slate-800 text-center text-xs text-slate-500">
+          <p>© 2026 ECHOX Market — كافة الحقوق محفوظة. الجمهورية التونسية.</p>
         </div>
       </div>
     </footer>

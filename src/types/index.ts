@@ -171,3 +171,20 @@ export interface SiteSettings {
   announcementText: MultilingualText;
   showAnnouncement: boolean;
 }
+
+export interface CategoryItem {
+  id: string;
+  label: string;
+  icon?: string;
+  desc?: string;
+}
+
+export interface PromoBanner {
+  id: string;
+  tag: string;
+  title: string;
+  subtitle: string;
+  active: boolean;
+  link?: string;
+  bgGradient?: string;
+}

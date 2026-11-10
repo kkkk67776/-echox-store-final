@@ -14,7 +14,7 @@ export const INITIAL_COMPANIES: Company[] = [
       fr: 'Distributeur officiel des équipements et composants certifiés ECHOX en Tunisie.',
       en: 'Official distributor of certified ECHOX hardware & equipment in Tunisia.'
     },
-    website: 'https://echox-store.tn'
+    website: 'https://ais-pre-h73tzqybodmt5v2ji4xgqc-519756359948.europe-west2.run.app'
   },
   {
     id: 'comp_atlas',
@@ -295,14 +295,14 @@ export const INITIAL_OWNER_SETTINGS: OwnerSettings = {
   loginEmail: 'abdelkaderbahri570@gmail.com', // Locked sovereign Google email
   photoUrl: '/assets/aistudio/file_0000000048188243bc0b721218c854fc_ea3ea21d.png',
   bio: {
-    ar: 'مالك ومؤسس منصة ECHOX STORE تونس. متخصص في سلاسل الإمداد للقطع الأصلية والأجهزة التقنية الدقيقة.',
-    fr: 'Fondateur et propriétaire d’ECHOX STORE Tunisie, dédié aux pièces industrielles et d’origine.',
-    en: 'Founder and owner of ECHOX STORE Tunisia, committed to genuine hardware and industrial parts.'
+    ar: 'مالك ومؤسس منصة ECHOX Store تونس. متخصص في سلاسل الإمداد للقطع الأصلية والأجهزة التقنية الدقيقة.',
+    fr: 'Fondateur et propriétaire d’ECHOX Store Tunisie, dédié aux pièces industrielles et d’origine.',
+    en: 'Founder and owner of ECHOX Store Tunisia, committed to genuine hardware and industrial parts.'
   }
 };
 
 export const INITIAL_SITE_SETTINGS: SiteSettings = {
-  storeName: 'ECHOX STORE',
+  storeName: 'ECHOX Store',
   slogan: {
     ar: 'المنصة التونسية الرائدة للأجهزة والقطع الأصلية',
     fr: 'La plateforme tunisienne de référence pour l’outillage et pièces certifiées',

@@ -9,7 +9,6 @@ import {
   Package, 
   Building2, 
   ShoppingBag, 
-  MessageSquare, 
   Settings, 
   Plus, 
   Edit, 
@@ -26,26 +25,46 @@ import {
   TrendingUp,
   Clock,
   Save,
-  Send,
-  KeyRound
+  KeyRound,
+  Sparkles,
+  X,
+  ChevronLeft,
+  MapPin,
+  Tag,
+  Smartphone,
+  RefreshCw,
+  FileText,
+  Percent,
+  Check
 } from 'lucide-react';
-import { Product, Company, Order, OrderStatus } from '../types';
+import { Product, Company, Order, OrderStatus, CategoryItem, PromoBanner } from '../types';
 import { TUNISIAN_GOVERNORATES, getGovernorateName } from '../data/governorates';
-
 import { 
+  getAuthorizedOwnerEmail, 
+  setAuthorizedOwnerEmail, 
+  getAuthorizedOwnerPhone, 
+  setAuthorizedOwnerPhone, 
   getOwnerGoogleUser, 
   isOwnerUnlocked,
   clearOwnerSecuritySession, 
-  logoutOwnerServer, 
-  OWNER_EMAIL 
+  logoutOwnerServer,
+  saveOwnerLockConfig,
+  fetchOwnerLockConfig,
+  verifyOwnerLockInput
 } from '../lib/security';
-import { OwnerSecuritySettings } from './security/OwnerSecuritySettings';
-import PartnersManager from './PartnersManager';
-import OwnerDashboardMaster from './OwnerDashboardMaster';
 
 interface OwnerDashboardProps {
   onNavigate?: (route: string, state?: any) => void;
 }
+
+type DashboardTab = 
+  | 'overview'
+  | 'account_security'
+  | 'products'
+  | 'categories'
+  | 'partners'
+  | 'banners'
+  | 'orders';
 
 export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) => {
   const navigate = (route: string, state?: any) => {
@@ -67,12 +86,18 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
     toggleProductActive,
     companies, 
     addCompany, 
-    updateCompany, 
     deleteCompany,
+    categories,
+    addCategory,
+    deleteCategory,
+    banners,
+    addBanner,
+    deleteBanner,
+    toggleBannerActive,
     orders, 
+    addManualOrder,
     updateOrderStatus,
-    inquiries, 
-    replyToInquiry,
+    deleteOrder,
     ownerSettings, 
     updateOwnerSettings,
     siteSettings, 
@@ -81,20 +106,42 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
     t 
   } = useStore();
 
-  // Tab navigation
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'products' | 'companies' | 'master' | 'orders' | 'support' | 'settings' | 'security'>('dashboard');
+  // Active Tab
+  const [activeTab, setActiveTab] = useState<DashboardTab>('overview');
 
-  // Products state
+  // Confirmation Delete Modal
+  const [deleteConfirmModal, setDeleteConfirmModal] = useState<{
+    isOpen: boolean;
+    type: 'product' | 'category' | 'partner' | 'banner' | 'order';
+    id: string;
+    title: string;
+  }>({ isOpen: false, type: 'product', id: '', title: '' });
+
+  // 1. Account & Security Form States
+  const [editOwnerEmail, setEditOwnerEmail] = useState(ownerSettings.loginEmail || getAuthorizedOwnerEmail());
+  const [editOwnerPhone, setEditOwnerPhone] = useState(ownerSettings.primaryPhone || getAuthorizedOwnerPhone());
+  const [emailSavedSuccess, setEmailSavedSuccess] = useState(false);
+  const [phoneSavedSuccess, setPhoneSavedSuccess] = useState(false);
+
+  // Security Lock Change State
+  const [lockType, setLockType] = useState<'pin' | 'pattern'>('pin');
+  const [currentSecretInput, setCurrentSecretInput] = useState('');
+  const [newSecretInput, setNewSecretInput] = useState('');
+  const [confirmSecretInput, setConfirmSecretInput] = useState('');
+  const [secretChangeStep, setSecretChangeStep] = useState<1 | 2>(1);
+  const [secretSuccessMessage, setSecretSuccessMessage] = useState('');
+  const [secretErrorMessage, setSecretErrorMessage] = useState('');
+  const [isChangingPasscode, setIsChangingPasscode] = useState(false);
+
+  // 2. Product Form & Filter States
   const [prodSearch, setProdSearch] = useState('');
   const [showAddProdModal, setShowAddProdModal] = useState(false);
   const [editingProd, setEditingProd] = useState<Product | null>(null);
 
-  // New/Edit Product form inputs
   const [prodNameAr, setProdNameAr] = useState('');
   const [prodNameFr, setProdNameFr] = useState('');
-  const [prodNameEn, setProdNameEn] = useState('');
   const [prodDescAr, setProdDescAr] = useState('');
-  const [prodPrice, setProdPrice] = useState('0');
+  const [prodPrice, setProdPrice] = useState('');
   const [prodOriginalPrice, setProdOriginalPrice] = useState('');
   const [prodStock, setProdStock] = useState('10');
   const [prodCategory, setProdCategory] = useState('power_tools');
@@ -103,50 +150,60 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
   const [prodImagesText, setProdImagesText] = useState('');
   const [prodFeatured, setProdFeatured] = useState(false);
 
-  // Companies state
-  const [showAddCompModal, setShowAddCompModal] = useState(false);
-  const [compName, setCompName] = useState('');
-  const [compPhone, setCompPhone] = useState('');
-  const [compEmail, setCompEmail] = useState('');
-  const [compAddress, setCompAddress] = useState('');
-  const [compGov, setCompGov] = useState('tunis');
-  const [compDescAr, setCompDescAr] = useState('');
+  // 3. Category Form States
+  const [showAddCategoryModal, setShowAddCategoryModal] = useState(false);
+  const [catId, setCatId] = useState('');
+  const [catLabel, setCatLabel] = useState('');
+  const [catIcon, setCatIcon] = useState('📦');
+  const [catDesc, setCatDesc] = useState('');
 
-  // Orders state
+  // 4. Partner / Company Form States
+  const [showAddPartnerModal, setShowAddPartnerModal] = useState(false);
+  const [partnerName, setPartnerName] = useState('');
+  const [partnerPhone, setPartnerPhone] = useState('');
+  const [partnerEmail, setPartnerEmail] = useState('');
+  const [partnerAddress, setPartnerAddress] = useState('');
+  const [partnerGov, setPartnerGov] = useState('tunis');
+  const [partnerDesc, setPartnerDesc] = useState('');
+  const [partnerLogo, setPartnerLogo] = useState('');
+
+  // 5. Banner Form States
+  const [showAddBannerModal, setShowAddBannerModal] = useState(false);
+  const [bannerTag, setBannerTag] = useState('عروض حصرية');
+  const [bannerTitle, setBannerTitle] = useState('');
+  const [bannerSubtitle, setBannerSubtitle] = useState('');
+  const [bannerGradient, setBannerGradient] = useState('from-[#FF6B00] via-[#F97316] to-[#EA580C]');
+
+  // 6. Orders States & Manual Order Form
   const [orderSearch, setOrderSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState<string>('all');
-  const [adminNoteInput, setAdminNoteInput] = useState<{ [key: string]: string }>({});
+  const [orderStatusFilter, setOrderStatusFilter] = useState<string>('all');
+  const [showAddManualOrderModal, setShowAddManualOrderModal] = useState(false);
+  const [manualCustName, setManualCustName] = useState('');
+  const [manualCustPhone, setManualCustPhone] = useState('');
+  const [manualGov, setManualGov] = useState('tunis');
+  const [manualCity, setManualCity] = useState('');
+  const [manualAmount, setManualAmount] = useState('');
+  const [manualNotes, setManualNotes] = useState('');
 
-  // Support / Inquiries reply state
-  const [replyInputs, setReplyInputs] = useState<{ [key: string]: string }>({});
-
-  // Settings form state
-  const [secondaryPhone, setSecondaryPhone] = useState(ownerSettings.secondaryPhone);
-  const [contactEmail, setContactEmail] = useState(ownerSettings.contactEmail);
-  const [siteAnnouncement, setSiteAnnouncement] = useState(siteSettings.announcementText[language]);
-  const [shippingFee, setShippingFee] = useState(siteSettings.standardShippingFee.toString());
-  const [freeThreshold, setFreeThreshold] = useState(siteSettings.freeShippingThreshold.toString());
-  const [settingsSavedMessage, setSettingsSavedMessage] = useState(false);
-
+  // Authorization Check
   useEffect(() => {
     let cancelled = false;
 
     async function guard() {
-      // 1) التحقق من تسجيل الدخول بحساب Google المعتمد
       const googleUser = getOwnerGoogleUser();
-      if (!googleUser || googleUser.email.toLowerCase() !== OWNER_EMAIL.toLowerCase()) {
+      const authorizedEmail = getAuthorizedOwnerEmail().toLowerCase();
+      
+      if (!googleUser || googleUser.email.toLowerCase() !== authorizedEmail) {
         clearOwnerSecuritySession();
         if (!cancelled) navigate('/owner/login');
         return;
       }
 
-      // 2) التحقق من فك قفل شاشة الهاتف (Pattern أو PIN)
       if (!isOwnerUnlocked()) {
         if (!cancelled) navigate('/owner/lock');
         return;
       }
 
-      // ✅ كل الشروط تحققت — اسمح بعرض لوحة التحكم
       if (!cancelled) {
         setAuthorized(true);
         setChecking(false);
@@ -157,25 +214,12 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
     return () => { cancelled = true; };
   }, []);
 
-  // While checking authorization, display the mandatory security dark/gold screen
   if (checking) {
     return (
-      <div 
-        style={{ 
-          minHeight: '85vh', 
-          display: 'flex',
-          alignItems: 'center', 
-          justifyContent: 'center',
-          background: '#0A0A0B', 
-          color: '#D4AF37',
-          fontSize: '18px',
-          fontWeight: 'bold',
-          letterSpacing: '1px'
-        }}
-      >
+      <div className="min-h-[85vh] flex items-center justify-center bg-[#0B0F17] text-white">
         <div className="flex flex-col items-center gap-3">
-          <div className="w-10 h-10 border-3 border-[#D4AF37] border-t-transparent rounded-full animate-spin" />
-          <span>جارٍ التحقق من الصلاحيات ونظام الأمان السيادي...</span>
+          <div className="w-10 h-10 border-3 border-[#FF6B00] border-t-transparent rounded-full animate-spin" />
+          <span className="text-xs font-bold text-slate-300">جارٍ التحقق من الصلاحيات والبيئة المشفرة...</span>
         </div>
       </div>
     );
@@ -188,22 +232,96 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
     navigate('/owner/login');
   };
 
-  // Calculations
+  // Calculations for KPI Cards
   const totalSales = orders.reduce((sum, o) => sum + (o.status !== 'cancelled' ? o.totalAmount : 0), 0);
   const totalOrdersCount = orders.length;
   const newOrdersCount = orders.filter(o => o.status === 'new').length;
-  const inProcessingCount = orders.filter(o => o.status === 'under_confirmation' || o.status === 'preparing' || o.status === 'out_for_delivery').length;
-  const lowStockProds = products.filter(p => p.stock <= 5);
+  const completedOrdersCount = orders.filter(o => o.status === 'delivered').length;
 
-  // Product Add / Edit Handler
+  // Handlers for Account & Security
+  const handleSaveEmail = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editOwnerEmail.trim() || !editOwnerEmail.includes('@')) return;
+    setAuthorizedOwnerEmail(editOwnerEmail.trim());
+    updateOwnerSettings({ loginEmail: editOwnerEmail.trim() });
+    setEmailSavedSuccess(true);
+    setTimeout(() => setEmailSavedSuccess(false), 3000);
+  };
+
+  const handleSavePhone = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editOwnerPhone.trim()) return;
+    setAuthorizedOwnerPhone(editOwnerPhone.trim());
+    updateOwnerSettings({ primaryPhone: editOwnerPhone.trim(), secondaryPhone: editOwnerPhone.trim() });
+    updateSiteSettings({ supportPhone: editOwnerPhone.trim(), whatsappPhone: editOwnerPhone.trim().replace(/\D/g, '') });
+    setPhoneSavedSuccess(true);
+    setTimeout(() => setPhoneSavedSuccess(false), 3000);
+  };
+
+  const handleChangeSecretCode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSecretErrorMessage('');
+    setSecretSuccessMessage('');
+
+    if (secretChangeStep === 1) {
+      if (!currentSecretInput.trim()) {
+        setSecretErrorMessage('يرجى إدخال رمز الدخول الحالي أولاً.');
+        return;
+      }
+      setIsChangingPasscode(true);
+      try {
+        const confRes = await fetchOwnerLockConfig();
+        if (confRes.config?.lock_hash) {
+          const verify = await verifyOwnerLockInput(currentSecretInput.trim(), confRes.config.lock_hash, confRes.config.lock_type);
+          if (!verify.success) {
+            setSecretErrorMessage('الرمز الحالي غير صحيح! تحقق من الرمز وأعد المحاولة.');
+            setIsChangingPasscode(false);
+            return;
+          }
+        }
+        setSecretChangeStep(2);
+      } catch (err) {
+        setSecretChangeStep(2);
+      } finally {
+        setIsChangingPasscode(false);
+      }
+    } else {
+      if (newSecretInput.trim().length < 4) {
+        setSecretErrorMessage('الرمز الجديد يجب أن يتكون من 4 خانات أو أحرف على الأقل.');
+        return;
+      }
+      if (newSecretInput.trim() !== confirmSecretInput.trim()) {
+        setSecretErrorMessage('تأكيد الرمز غير متطابق مع الرمز الجديد!');
+        return;
+      }
+      setIsChangingPasscode(true);
+      try {
+        await saveOwnerLockConfig(lockType, newSecretInput.trim(), false);
+        setSecretSuccessMessage('تم تغيير رمز الدخول السري وتشفيره بنجاح ✓');
+        setCurrentSecretInput('');
+        setNewSecretInput('');
+        setConfirmSecretInput('');
+        setSecretChangeStep(1);
+        setTimeout(() => setSecretSuccessMessage(''), 4000);
+      } catch (err) {
+        setSecretErrorMessage('حدث خطأ أثناء حفظ الرمز. يرجى إعادة المحاولة.');
+      } finally {
+        setIsChangingPasscode(false);
+      }
+    }
+  };
+
+  // Handlers for Products
   const handleSaveProduct = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!prodNameAr.trim() || !prodPrice) return;
+
     const imgs = prodImagesText.split('\n').map(s => s.trim()).filter(Boolean);
     const selectedComp = companies.find(c => c.id === prodCompanyId);
 
     if (editingProd) {
       updateProduct(editingProd.id, {
-        name: { ar: prodNameAr || editingProd.name.ar, fr: prodNameFr || prodNameAr, en: prodNameEn || prodNameAr },
+        name: { ar: prodNameAr, fr: prodNameFr || prodNameAr, en: prodNameAr },
         description: { ar: prodDescAr || editingProd.description.ar, fr: prodDescAr, en: prodDescAr },
         price: parseFloat(prodPrice) || 0,
         originalPrice: prodOriginalPrice ? parseFloat(prodOriginalPrice) : undefined,
@@ -215,10 +333,9 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
         images: imgs.length > 0 ? imgs : editingProd.images,
         featured: prodFeatured
       });
-      setEditingProd(null);
     } else {
       addProduct({
-        name: { ar: prodNameAr, fr: prodNameFr || prodNameAr, en: prodNameEn || prodNameAr },
+        name: { ar: prodNameAr, fr: prodNameFr || prodNameAr, en: prodNameAr },
         description: { ar: prodDescAr, fr: prodDescAr, en: prodDescAr },
         category: prodCategory,
         price: parseFloat(prodPrice) || 0,
@@ -227,7 +344,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
         companyId: prodCompanyId,
         companyName: selectedComp?.name || 'ECHOX Distribution',
         governorate: prodGov,
-        images: imgs.length > 0 ? imgs : ['/src/assets/images/hero_echox_tunisia_store_1793963107162.jpg'],
+        images: imgs.length > 0 ? imgs : ['/assets/aistudio/file_0000000048188243bc0b721218c854fc_ea3ea21d.png'],
         featured: prodFeatured,
         active: true,
         deliveryTimeDays: 2
@@ -235,27 +352,21 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
     }
 
     setShowAddProdModal(false);
-    resetProdForm();
-  };
-
-  const resetProdForm = () => {
+    setEditingProd(null);
     setProdNameAr('');
     setProdNameFr('');
-    setProdNameEn('');
     setProdDescAr('');
-    setProdPrice('0');
+    setProdPrice('');
     setProdOriginalPrice('');
     setProdStock('10');
     setProdImagesText('');
     setProdFeatured(false);
-    setEditingProd(null);
   };
 
-  const openEditModal = (p: Product) => {
+  const openEditProduct = (p: Product) => {
     setEditingProd(p);
     setProdNameAr(p.name.ar);
-    setProdNameFr(p.name.fr);
-    setProdNameEn(p.name.en);
+    setProdNameFr(p.name.fr || p.name.ar);
     setProdDescAr(p.description.ar);
     setProdPrice(p.price.toString());
     setProdOriginalPrice(p.originalPrice ? p.originalPrice.toString() : '');
@@ -268,27 +379,117 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
     setShowAddProdModal(true);
   };
 
-  // Company Add Handler
-  const handleSaveCompany = (e: React.FormEvent) => {
+  // Handlers for Categories
+  const handleSaveCategory = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!compName || !compPhone) return;
+    if (!catLabel.trim()) return;
 
-    addCompany({
-      name: compName,
-      logo: '/assets/aistudio/file_0000000048188243bc0b721218c854fc_ea3ea21d.png',
-      phone: compPhone,
-      email: compEmail || 'contact@company.tn',
-      address: compAddress || 'المنطقة الصناعية',
-      governorate: compGov,
-      description: { ar: compDescAr || compName, fr: compDescAr || compName, en: compDescAr || compName }
+    const autoId = catId.trim() ? catId.trim().toLowerCase().replace(/\s+/g, '_') : `cat_${Date.now()}`;
+    addCategory({
+      id: autoId,
+      label: catLabel.trim(),
+      icon: catIcon.trim() || '📦',
+      desc: catDesc.trim() || 'تصنيف معتمد في المتجر'
     });
 
-    setShowAddCompModal(false);
-    setCompName('');
-    setCompPhone('');
-    setCompEmail('');
-    setCompAddress('');
-    setCompDescAr('');
+    setShowAddCategoryModal(false);
+    setCatId('');
+    setCatLabel('');
+    setCatIcon('📦');
+    setCatDesc('');
+  };
+
+  // Handlers for Partners
+  const handleSavePartner = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!partnerName.trim() || !partnerPhone.trim()) return;
+
+    addCompany({
+      name: partnerName.trim(),
+      logo: partnerLogo.trim() || '/assets/aistudio/file_0000000048188243bc0b721218c854fc_ea3ea21d.png',
+      phone: partnerPhone.trim(),
+      email: partnerEmail.trim() || 'contact@partner.tn',
+      address: partnerAddress.trim() || 'المنطقة الصناعية',
+      governorate: partnerGov,
+      description: { ar: partnerDesc.trim() || partnerName, fr: partnerDesc.trim() || partnerName, en: partnerDesc.trim() || partnerName }
+    });
+
+    setShowAddPartnerModal(false);
+    setPartnerName('');
+    setPartnerPhone('');
+    setPartnerEmail('');
+    setPartnerAddress('');
+    setPartnerDesc('');
+    setPartnerLogo('');
+  };
+
+  // Handlers for Banners
+  const handleSaveBanner = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!bannerTitle.trim()) return;
+
+    addBanner({
+      tag: bannerTag.trim() || 'عروض حصرية',
+      title: bannerTitle.trim(),
+      subtitle: bannerSubtitle.trim() || 'توصيل سريع لكافة الـ24 ولاية والدفع عند المعاينة والاستلام',
+      active: true,
+      bgGradient: bannerGradient
+    });
+
+    setShowAddBannerModal(false);
+    setBannerTitle('');
+    setBannerSubtitle('');
+  };
+
+  // Handlers for Manual Order
+  const handleSaveManualOrder = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!manualCustName.trim() || !manualCustPhone.trim() || !manualAmount) return;
+
+    const amt = parseFloat(manualAmount) || 0;
+    addManualOrder({
+      customerName: manualCustName.trim(),
+      customerPhone: manualCustPhone.trim(),
+      totalAmount: amt,
+      subtotal: amt,
+      shippingAddress: {
+        id: `addr_${Date.now()}`,
+        isDefault: true,
+        fullName: manualCustName.trim(),
+        phone: manualCustPhone.trim(),
+        governorate: manualGov,
+        city: manualCity.trim() || 'تونس',
+        postalCode: '1000',
+        street: 'طلب مباشر هاتفياً / واتساب'
+      },
+      notes: manualNotes.trim() || 'طلب هاتفي مباشر مسجل يدوياً'
+    });
+
+    setShowAddManualOrderModal(false);
+    setManualCustName('');
+    setManualCustPhone('');
+    setManualCity('');
+    setManualAmount('');
+    setManualNotes('');
+  };
+
+  // Execute Confirmed Delete
+  const executeDelete = () => {
+    if (!deleteConfirmModal.id) return;
+
+    if (deleteConfirmModal.type === 'product') {
+      deleteProduct(deleteConfirmModal.id);
+    } else if (deleteConfirmModal.type === 'category') {
+      deleteCategory(deleteConfirmModal.id);
+    } else if (deleteConfirmModal.type === 'partner') {
+      deleteCompany(deleteConfirmModal.id);
+    } else if (deleteConfirmModal.type === 'banner') {
+      deleteBanner(deleteConfirmModal.id);
+    } else if (deleteConfirmModal.type === 'order') {
+      deleteOrder(deleteConfirmModal.id);
+    }
+
+    setDeleteConfirmModal({ isOpen: false, type: 'product', id: '', title: '' });
   };
 
   // Export CSV
@@ -298,8 +499,8 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
       o.trackingNumber,
       `"${o.customerName}"`,
       `"${o.customerPhone}"`,
-      o.shippingAddress.governorate,
-      `"${o.shippingAddress.city}"`,
+      o.shippingAddress?.governorate || '',
+      `"${o.shippingAddress?.city || ''}"`,
       o.totalAmount.toFixed(3),
       o.status,
       o.createdAt
@@ -314,28 +515,6 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
     document.body.removeChild(link);
   };
 
-  // Save Site & Owner Settings
-  const handleSaveSettings = (e: React.FormEvent) => {
-    e.preventDefault();
-    updateOwnerSettings({
-      secondaryPhone: secondaryPhone.trim(),
-      contactEmail: contactEmail.trim()
-    });
-    updateSiteSettings({
-      supportPhone: secondaryPhone.trim(),
-      whatsappPhone: secondaryPhone.trim().replace(/\D/g, ''),
-      standardShippingFee: parseFloat(shippingFee) || 7.000,
-      freeShippingThreshold: parseFloat(freeThreshold) || 150.000,
-      announcementText: {
-        ...siteSettings.announcementText,
-        [language]: siteAnnouncement
-      }
-    });
-
-    setSettingsSavedMessage(true);
-    setTimeout(() => setSettingsSavedMessage(false), 3000);
-  };
-
   // Filtered lists
   const filteredProducts = products.filter(p => 
     p.name.ar.toLowerCase().includes(prodSearch.toLowerCase()) || 
@@ -347,644 +526,790 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
     const matchSearch = o.trackingNumber.toLowerCase().includes(orderSearch.toLowerCase()) ||
       o.customerName.toLowerCase().includes(orderSearch.toLowerCase()) ||
       o.customerPhone.includes(orderSearch);
-    const matchStatus = statusFilter === 'all' || o.status === statusFilter;
+    const matchStatus = orderStatusFilter === 'all' || o.status === orderStatusFilter;
     return matchSearch && matchStatus;
   });
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8 animate-fadeIn">
+    <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-8 space-y-5 animate-fadeIn select-none text-[#0F172A] dark:text-slate-100">
       
-      {/* Top Banner with Sovereign Credentials */}
-      <div className="bg-[#0B0F17] rounded-3xl p-6 text-white flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-xl border border-slate-800">
-        <div className="flex items-center gap-4">
-          <div className="w-14 h-14 rounded-2xl bg-[#FF6B00] text-white flex items-center justify-center font-black text-2xl shadow-lg shrink-0">
-            E
+      {/* 1. Header Card with Sovereign Credentials and Logout */}
+      <div className="bg-[#0B0F17] rounded-3xl p-4 sm:p-6 text-white flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-xl border border-slate-800">
+        <div className="flex items-center gap-3.5">
+          <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl bg-[#FF6B00] text-white flex items-center justify-center font-black text-xl shadow-lg shrink-0">
+            EX
           </div>
           <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-xl sm:text-2xl font-black">{t.admin.dashboard}</h1>
-              <span className="text-[10px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 px-2 py-0.5 rounded-full font-bold">
-                جلسة مشفرة نشطة ✓
+            <div className="flex items-center gap-2 flex-wrap">
+              <h1 className="text-base sm:text-lg font-black tracking-tight text-white leading-tight">
+                لوحة الإعدادات الشاملة للمالك
+              </h1>
+              <span className="text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded-full flex items-center gap-1">
+                <ShieldCheck className="w-3 h-3 text-emerald-400" />
+                <span>جلسة مشفرة نشطة</span>
               </span>
             </div>
-            <p className="text-xs text-slate-400 mt-1 flex items-center gap-2 flex-wrap">
-              <span>المالك المعتمد: <strong className="text-white font-mono" dir="ltr">{ownerSettings.loginEmail}</strong></span>
-              <span aria-hidden="true">·</span>
-              <span>الهاتف السيادي: <strong className="text-[#FF6B00] font-mono" dir="ltr">{ownerSettings.primaryPhone}</strong></span>
+            <p className="text-xs text-slate-400 mt-0.5">
+              الحساب المعتمد: <strong className="text-white">{ownerSettings.loginEmail}</strong> • الهاتف: <strong className="text-white font-mono">{ownerSettings.primaryPhone}</strong>
             </p>
           </div>
         </div>
 
-        <button
-          onClick={handleLogout}
-          className="px-4 py-2.5 rounded-xl bg-white/10 hover:bg-red-600/80 text-white text-xs font-bold transition-colors flex items-center gap-2 shrink-0 cursor-pointer"
-        >
-          <LogOut className="w-4 h-4" />
-          <span>{t.ownerSecurity.logout}</span>
-        </button>
+        <div className="flex items-center gap-2 w-full md:w-auto justify-between md:justify-end">
+          <button
+            type="button"
+            onClick={() => navigate('/')}
+            className="px-3.5 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-bold transition-colors cursor-pointer"
+          >
+            عرض المتجر
+          </button>
+          <button
+            type="button"
+            onClick={handleLogout}
+            className="px-3.5 py-2 rounded-xl bg-red-600/80 hover:bg-red-600 text-white text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer"
+          >
+            <LogOut className="w-3.5 h-3.5" />
+            <span>تسجيل الخروج</span>
+          </button>
+        </div>
       </div>
 
-      {/* Navigation Pills */}
-      <div className="flex items-center gap-2 overflow-x-auto pb-2 border-b border-slate-200">
-        <button
-          onClick={() => setActiveTab('dashboard')}
-          className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 shrink-0 ${
-            activeTab === 'dashboard' ? 'bg-[#FF6B00] text-white shadow-xs' : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
-          }`}
-        >
-          <LayoutDashboard className="w-4 h-4" />
-          <span>{t.admin.dashboard}</span>
-        </button>
-
-        <button
-          onClick={() => setActiveTab('products')}
-          className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 shrink-0 ${
-            activeTab === 'products' ? 'bg-[#FF6B00] text-white shadow-xs' : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
-          }`}
-        >
-          <Package className="w-4 h-4" />
-          <span>{t.admin.products} ({products.length})</span>
-        </button>
-
-        <button
-          onClick={() => setActiveTab('companies')}
-          className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 shrink-0 ${
-            activeTab === 'companies' ? 'bg-[#FF6B00] text-white shadow-xs' : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
-          }`}
-        >
-          <Building2 className="w-4 h-4" />
-          <span>{t.admin.companies}</span>
-        </button>
-
-        <button
-          onClick={() => setActiveTab('master')}
-          className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 shrink-0 ${
-            activeTab === 'master' ? 'bg-[#F59E0B] text-black shadow-lg shadow-[#F59E0B]/20' : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
-          }`}
-        >
-          <Package className="w-4 h-4 text-amber-500" />
-          <span>إدارة الشركات والمنتجات (Master)</span>
-        </button>
-
-        <button
-          onClick={() => setActiveTab('orders')}
-          className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 shrink-0 ${
-            activeTab === 'orders' ? 'bg-[#FF6B00] text-white shadow-xs' : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
-          }`}
-        >
-          <ShoppingBag className="w-4 h-4" />
-          <span>{t.admin.orders} ({orders.length})</span>
-        </button>
-
-        <button
-          onClick={() => setActiveTab('support')}
-          className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 shrink-0 ${
-            activeTab === 'support' ? 'bg-[#FF6B00] text-white shadow-xs' : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
-          }`}
-        >
-          <MessageSquare className="w-4 h-4" />
-          <span>{t.admin.support} ({inquiries.length})</span>
-        </button>
-
-        <button
-          onClick={() => setActiveTab('settings')}
-          className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 shrink-0 ${
-            activeTab === 'settings' ? 'bg-[#FF6B00] text-white shadow-xs' : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
-          }`}
-        >
-          <Settings className="w-4 h-4" />
-          <span>{t.admin.settings}</span>
-        </button>
-
-        <button
-          onClick={() => setActiveTab('security')}
-          className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 shrink-0 ${
-            activeTab === 'security' ? 'bg-[#0B0F17] text-[#D4AF37] border-2 border-[#D4AF37] shadow-sm' : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
-          }`}
-        >
-          <ShieldCheck className="w-4 h-4 text-amber-500" />
-          <span>الأمان والخصوصية</span>
-        </button>
-      </div>
-
-      {/* TAB 1: DASHBOARD OVERVIEW */}
-      {activeTab === 'dashboard' && (
-        <div className="space-y-6">
-          
-          {/* KPI Cards Strip */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-1">
-              <span className="text-xs text-slate-500 font-bold">{t.admin.totalRevenue}</span>
-              <p className="text-2xl font-black text-[#FF6B00] tabular-nums">
-                {totalSales.toFixed(3)} <span className="text-xs font-bold text-slate-600">{t.cart.currency}</span>
-              </p>
-              <span className="text-[11px] text-emerald-600 font-bold flex items-center gap-0.5">
-                <TrendingUp className="w-3 h-3" /> نشاط مباشر ومبيعات فعلية
-              </span>
-            </div>
-
-            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-1">
-              <span className="text-xs text-slate-500 font-bold">{t.admin.totalOrders}</span>
-              <p className="text-2xl font-black text-slate-900 tabular-nums">
-                {totalOrdersCount}
-              </p>
-              <span className="text-[11px] text-slate-500">
-                منها {newOrdersCount} طلبات جديدة
-              </span>
-            </div>
-
-            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-1">
-              <span className="text-xs text-slate-500 font-bold">{t.admin.inProcessing}</span>
-              <p className="text-2xl font-black text-blue-600 tabular-nums">
-                {inProcessingCount}
-              </p>
-              <span className="text-[11px] text-slate-500">
-                مع شركات التوصيل التونسية
-              </span>
-            </div>
-
-            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-1">
-              <span className="text-xs text-slate-500 font-bold">{t.admin.lowStock}</span>
-              <p className="text-2xl font-black text-amber-600 tabular-nums">
-                {lowStockProds.length}
-              </p>
-              <span className="text-[11px] text-slate-500">
-                تنبيه لتجديد المخزون
-              </span>
-            </div>
+      {/* 2. Top Summary KPI Metrics Cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-4">
+        <div className="bg-[#F8FAFC] dark:bg-[#1E293B] rounded-2xl sm:rounded-3xl p-3.5 sm:p-4 border border-[#E2E8F0] dark:border-slate-800 shadow-2xs">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400">إجمالي المبيعات</span>
+            <span className="w-7 h-7 rounded-xl bg-[#FF6B00]/10 text-[#FF6B00] flex items-center justify-center">
+              <TrendingUp className="w-3.5 h-3.5" />
+            </span>
           </div>
+          <div className="mt-2">
+            <span className="text-lg sm:text-2xl font-black text-[#FF6B00] font-mono block leading-none">
+              {totalSales.toFixed(3)}
+            </span>
+            <span className="text-[10px] text-slate-500 font-bold mt-1 block">دينار تونسي</span>
+          </div>
+        </div>
 
-          {/* Recent Orders Overview Table */}
-          <div className="bg-white rounded-3xl border border-slate-200 shadow-xs p-6 space-y-4">
-            <div className="flex items-center justify-between">
-              <h2 className="text-base font-bold text-slate-900">أحدث الطلبيات المستلمة</h2>
+        <div className="bg-[#F8FAFC] dark:bg-[#1E293B] rounded-2xl sm:rounded-3xl p-3.5 sm:p-4 border border-[#E2E8F0] dark:border-slate-800 shadow-2xs">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400">إجمالي الطلبات</span>
+            <span className="w-7 h-7 rounded-xl bg-blue-500/10 text-blue-500 flex items-center justify-center">
+              <ShoppingBag className="w-3.5 h-3.5" />
+            </span>
+          </div>
+          <div className="mt-2">
+            <span className="text-lg sm:text-2xl font-black text-[#0F172A] dark:text-white font-mono block leading-none">
+              {totalOrdersCount}
+            </span>
+            <span className="text-[10px] text-slate-500 font-bold mt-1 block">طلب مسجل بالمتجر</span>
+          </div>
+        </div>
+
+        <div className="bg-[#F8FAFC] dark:bg-[#1E293B] rounded-2xl sm:rounded-3xl p-3.5 sm:p-4 border border-[#E2E8F0] dark:border-slate-800 shadow-2xs">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400">المنتجات المعروضة</span>
+            <span className="w-7 h-7 rounded-xl bg-emerald-500/10 text-emerald-500 flex items-center justify-center">
+              <Package className="w-3.5 h-3.5" />
+            </span>
+          </div>
+          <div className="mt-2">
+            <span className="text-lg sm:text-2xl font-black text-[#0F172A] dark:text-white font-mono block leading-none">
+              {products.length}
+            </span>
+            <span className="text-[10px] text-slate-500 font-bold mt-1 block">منتج متاح للشراء</span>
+          </div>
+        </div>
+
+        <div className="bg-[#F8FAFC] dark:bg-[#1E293B] rounded-2xl sm:rounded-3xl p-3.5 sm:p-4 border border-[#E2E8F0] dark:border-slate-800 shadow-2xs">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400">الشركاء والعلامات</span>
+            <span className="w-7 h-7 rounded-xl bg-purple-500/10 text-purple-500 flex items-center justify-center">
+              <Building2 className="w-3.5 h-3.5" />
+            </span>
+          </div>
+          <div className="mt-2">
+            <span className="text-lg sm:text-2xl font-black text-[#0F172A] dark:text-white font-mono block leading-none">
+              {companies.length}
+            </span>
+            <span className="text-[10px] text-slate-500 font-bold mt-1 block">شريك وموزع معتمد</span>
+          </div>
+        </div>
+      </div>
+
+      {/* 3. Google Play Horizontal Tab Chips Navigation */}
+      <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-none snap-x border-b border-[#E2E8F0] dark:border-slate-800">
+        <button
+          type="button"
+          onClick={() => setActiveTab('overview')}
+          className={`px-4 py-2 rounded-full text-xs font-bold shrink-0 transition-all cursor-pointer flex items-center gap-1.5 active:scale-95 ${
+            activeTab === 'overview'
+              ? 'bg-[#FF6B00] text-white shadow-xs'
+              : 'bg-[#F8FAFC] dark:bg-[#1E293B] text-slate-700 dark:text-slate-200 border border-[#E2E8F0] dark:border-slate-800 hover:border-slate-400'
+          }`}
+        >
+          <LayoutDashboard className="w-3.5 h-3.5" />
+          <span>نظرة عامة</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('account_security')}
+          className={`px-4 py-2 rounded-full text-xs font-bold shrink-0 transition-all cursor-pointer flex items-center gap-1.5 active:scale-95 ${
+            activeTab === 'account_security'
+              ? 'bg-[#FF6B00] text-white shadow-xs'
+              : 'bg-[#F8FAFC] dark:bg-[#1E293B] text-slate-700 dark:text-slate-200 border border-[#E2E8F0] dark:border-slate-800 hover:border-slate-400'
+          }`}
+        >
+          <KeyRound className="w-3.5 h-3.5" />
+          <span>إعدادات الحساب والأمان</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('products')}
+          className={`px-4 py-2 rounded-full text-xs font-bold shrink-0 transition-all cursor-pointer flex items-center gap-1.5 active:scale-95 ${
+            activeTab === 'products'
+              ? 'bg-[#FF6B00] text-white shadow-xs'
+              : 'bg-[#F8FAFC] dark:bg-[#1E293B] text-slate-700 dark:text-slate-200 border border-[#E2E8F0] dark:border-slate-800 hover:border-slate-400'
+          }`}
+        >
+          <Package className="w-3.5 h-3.5" />
+          <span>إدارة المنتجات ({products.length})</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('categories')}
+          className={`px-4 py-2 rounded-full text-xs font-bold shrink-0 transition-all cursor-pointer flex items-center gap-1.5 active:scale-95 ${
+            activeTab === 'categories'
+              ? 'bg-[#FF6B00] text-white shadow-xs'
+              : 'bg-[#F8FAFC] dark:bg-[#1E293B] text-slate-700 dark:text-slate-200 border border-[#E2E8F0] dark:border-slate-800 hover:border-slate-400'
+          }`}
+        >
+          <Tag className="w-3.5 h-3.5" />
+          <span>إدارة التصنيفات ({categories.length})</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('partners')}
+          className={`px-4 py-2 rounded-full text-xs font-bold shrink-0 transition-all cursor-pointer flex items-center gap-1.5 active:scale-95 ${
+            activeTab === 'partners'
+              ? 'bg-[#FF6B00] text-white shadow-xs'
+              : 'bg-[#F8FAFC] dark:bg-[#1E293B] text-slate-700 dark:text-slate-200 border border-[#E2E8F0] dark:border-slate-800 hover:border-slate-400'
+          }`}
+        >
+          <Building2 className="w-3.5 h-3.5" />
+          <span>الشركاء والعلامات ({companies.length})</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('banners')}
+          className={`px-4 py-2 rounded-full text-xs font-bold shrink-0 transition-all cursor-pointer flex items-center gap-1.5 active:scale-95 ${
+            activeTab === 'banners'
+              ? 'bg-[#FF6B00] text-white shadow-xs'
+              : 'bg-[#F8FAFC] dark:bg-[#1E293B] text-slate-700 dark:text-slate-200 border border-[#E2E8F0] dark:border-slate-800 hover:border-slate-400'
+          }`}
+        >
+          <Sparkles className="w-3.5 h-3.5" />
+          <span>العروض والبانرات ({banners.length})</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('orders')}
+          className={`px-4 py-2 rounded-full text-xs font-bold shrink-0 transition-all cursor-pointer flex items-center gap-1.5 active:scale-95 ${
+            activeTab === 'orders'
+              ? 'bg-[#FF6B00] text-white shadow-xs'
+              : 'bg-[#F8FAFC] dark:bg-[#1E293B] text-slate-700 dark:text-slate-200 border border-[#E2E8F0] dark:border-slate-800 hover:border-slate-400'
+          }`}
+        >
+          <ShoppingBag className="w-3.5 h-3.5" />
+          <span>الطلبات والمبيعات ({orders.length})</span>
+        </button>
+      </div>
+
+      {/* ========================================================= */}
+      {/* 4. Tab Content Router */}
+      {/* ========================================================= */}
+
+      {/* Tab 1: Overview */}
+      {activeTab === 'overview' && (
+        <div className="space-y-4">
+          <div className="p-4 sm:p-6 bg-[#F8FAFC] dark:bg-[#1E293B] rounded-3xl border border-[#E2E8F0] dark:border-slate-800 space-y-4">
+            <h3 className="text-sm font-black flex items-center gap-2">
+              <Sparkles className="w-4 h-4 text-[#FF6B00]" />
+              <span>إجراءات سريعة ومختصرة للوحة التحكم</span>
+            </h3>
+            
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
               <button
-                onClick={() => setActiveTab('orders')}
-                className="text-xs text-[#FF6B00] hover:underline font-bold"
+                type="button"
+                onClick={() => setShowAddProdModal(true)}
+                className="p-3 bg-white dark:bg-[#0F172A] rounded-2xl border border-[#E2E8F0] dark:border-slate-700 hover:border-[#FF6B00] text-start transition-all cursor-pointer"
               >
-                عرض كافة الطلبات ({orders.length}) ←
+                <Package className="w-5 h-5 text-[#FF6B00] mb-1.5" />
+                <span className="text-xs font-bold block">+ إضافة منتج</span>
+                <span className="text-[10px] text-slate-400">إدراج معدة أو قطعة غيار</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setShowAddManualOrderModal(true)}
+                className="p-3 bg-white dark:bg-[#0F172A] rounded-2xl border border-[#E2E8F0] dark:border-slate-700 hover:border-[#FF6B00] text-start transition-all cursor-pointer"
+              >
+                <ShoppingBag className="w-5 h-5 text-emerald-500 mb-1.5" />
+                <span className="text-xs font-bold block">+ تسجيل طلب يدوي</span>
+                <span className="text-[10px] text-slate-400">للطلبات الواردة هاتفياً</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setShowAddCategoryModal(true)}
+                className="p-3 bg-white dark:bg-[#0F172A] rounded-2xl border border-[#E2E8F0] dark:border-slate-700 hover:border-[#FF6B00] text-start transition-all cursor-pointer"
+              >
+                <Tag className="w-5 h-5 text-blue-500 mb-1.5" />
+                <span className="text-xs font-bold block">+ إضافة قسم جديد</span>
+                <span className="text-[10px] text-slate-400">يحدث شريط التصنيفات فوراً</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setShowAddPartnerModal(true)}
+                className="p-3 bg-white dark:bg-[#0F172A] rounded-2xl border border-[#E2E8F0] dark:border-slate-700 hover:border-[#FF6B00] text-start transition-all cursor-pointer"
+              >
+                <Building2 className="w-5 h-5 text-purple-500 mb-1.5" />
+                <span className="text-xs font-bold block">+ إضافة شريك</span>
+                <span className="text-[10px] text-slate-400">علامة تجارية أو موزع</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setShowAddBannerModal(true)}
+                className="p-3 bg-white dark:bg-[#0F172A] rounded-2xl border border-[#E2E8F0] dark:border-slate-700 hover:border-[#FF6B00] text-start transition-all cursor-pointer"
+              >
+                <Sparkles className="w-5 h-5 text-amber-500 mb-1.5" />
+                <span className="text-xs font-bold block">+ إضافة بانر</span>
+                <span className="text-[10px] text-slate-400">عروض وتخفيضات المتجر</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveTab('account_security')}
+                className="p-3 bg-white dark:bg-[#0F172A] rounded-2xl border border-[#E2E8F0] dark:border-slate-700 hover:border-[#FF6B00] text-start transition-all cursor-pointer"
+              >
+                <KeyRound className="w-5 h-5 text-red-500 mb-1.5" />
+                <span className="text-xs font-bold block">إعدادات الأمان</span>
+                <span className="text-[10px] text-slate-400">تعديل الإيميل والرمز</span>
               </button>
             </div>
-
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs text-start">
-                <thead className="bg-[#FAF8F5] text-slate-700 border-b border-slate-200">
-                  <tr>
-                    <th className="py-2.5 px-3 text-start">رقم التتبع</th>
-                    <th className="py-2.5 px-3 text-start">الحريف</th>
-                    <th className="py-2.5 px-3 text-start">الولاية</th>
-                    <th className="py-2.5 px-3 text-start">المبلغ</th>
-                    <th className="py-2.5 px-3 text-start">الحالة</th>
-                    <th className="py-2.5 px-3 text-start">إجراء سريع</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {orders.slice(0, 5).map(o => (
-                    <tr key={o.id} className="hover:bg-slate-50">
-                      <td className="py-3 px-3 font-mono font-bold text-slate-900">{o.trackingNumber}</td>
-                      <td className="py-3 px-3 font-semibold">{o.customerName}</td>
-                      <td className="py-3 px-3">{getGovernorateName(o.shippingAddress.governorate, language)}</td>
-                      <td className="py-3 px-3 font-black text-[#FF6B00] tabular-nums">{o.totalAmount.toFixed(3)} {t.cart.currency}</td>
-                      <td className="py-3 px-3">
-                        <span className="bg-slate-100 text-slate-800 px-2 py-0.5 rounded-full font-bold">
-                          {t.orderStatus[o.status] || o.status}
-                        </span>
-                      </td>
-                      <td className="py-3 px-3">
-                        <select
-                          value={o.status}
-                          onChange={e => updateOrderStatus(o.id, e.target.value as OrderStatus)}
-                          className="text-[11px] py-1 px-2 rounded-lg border border-slate-300 bg-white"
-                        >
-                          <option value="new">جديد</option>
-                          <option value="under_confirmation">قيد التأكيد</option>
-                          <option value="preparing">قيد التحضير</option>
-                          <option value="out_for_delivery">خرج للتوصيل</option>
-                          <option value="delivered">تم التسليم</option>
-                          <option value="cancelled">ملغى</option>
-                        </select>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
           </div>
-
         </div>
       )}
 
-      {/* TAB 2: PRODUCTS MANAGEMENT */}
-      {activeTab === 'products' && (
+      {/* Tab 2: Account & Security */}
+      {activeTab === 'account_security' && (
         <div className="space-y-4">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-white p-4 rounded-2xl border border-slate-200">
-            <div className="relative flex-1 max-w-md w-full">
-              <input
-                type="text"
-                placeholder="بحث في المنتجات بالاسم أو الشركة..."
-                value={prodSearch}
-                onChange={e => setProdSearch(e.target.value)}
-                className="w-full text-xs py-2 px-3 pl-8 rounded-xl border border-slate-300"
-              />
-              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
+          
+          {/* Card 1: Email & Phone Settings */}
+          <div className="bg-[#F8FAFC] dark:bg-[#1E293B] rounded-3xl p-4 sm:p-6 border border-[#E2E8F0] dark:border-slate-800 space-y-4">
+            <div className="flex items-center gap-2 pb-3 border-b border-slate-200 dark:border-slate-700">
+              <KeyRound className="w-4 h-4 text-[#FF6B00]" />
+              <h3 className="text-sm font-black">بيانات الاعتماد السيادية للمالك</h3>
             </div>
 
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => {
-                  resetProdForm();
-                  setShowAddProdModal(true);
-                }}
-                className="px-4 py-2 bg-[#FF6B00] hover:bg-[#e05e00] text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-xs"
-              >
-                <Plus className="w-4 h-4" />
-                <span>{t.admin.addProduct}</span>
-              </button>
-            </div>
-          </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              
+              {/* Form 1: Modify Owner Email */}
+              <form onSubmit={handleSaveEmail} className="bg-white dark:bg-[#0F172A] p-4 rounded-2xl border border-[#E2E8F0] dark:border-slate-700 space-y-3">
+                <label className="text-xs font-bold block">
+                  البريد الإلكتروني المعتمد للمالك (Gmail):
+                </label>
+                <div className="relative">
+                  <Mail className="w-4 h-4 text-slate-400 absolute right-3 top-3" />
+                  <input
+                    type="email"
+                    value={editOwnerEmail}
+                    onChange={e => setEditOwnerEmail(e.target.value)}
+                    dir="ltr"
+                    required
+                    placeholder="example@gmail.com"
+                    className="w-full text-xs py-2.5 pr-9 pl-3 rounded-xl border border-slate-300 dark:border-slate-600 bg-transparent text-[#0F172A] dark:text-white font-mono focus:border-[#FF6B00] outline-none"
+                  />
+                </div>
+                <div className="flex items-center justify-between pt-1">
+                  <button
+                    type="submit"
+                    className="px-4 py-2 rounded-xl bg-[#FF6B00] hover:bg-[#E05E00] text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer active:scale-95"
+                  >
+                    <Save className="w-3.5 h-3.5" />
+                    <span>حفظ وتأكيد البريد</span>
+                  </button>
+                  {emailSavedSuccess && (
+                    <span className="text-[11px] font-bold text-emerald-600 flex items-center gap-1">
+                      <Check className="w-3.5 h-3.5" />
+                      <span>تم الحفظ بنجاح</span>
+                    </span>
+                  )}
+                </div>
+              </form>
 
-          {/* Products Table */}
-          <div className="bg-white rounded-3xl border border-slate-200 overflow-hidden shadow-xs">
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs text-start">
-                <thead className="bg-[#FAF8F5] text-slate-700 border-b border-slate-200">
-                  <tr>
-                    <th className="py-3 px-3 text-start">الصورة</th>
-                    <th className="py-3 px-3 text-start">اسم المنتج</th>
-                    <th className="py-3 px-3 text-start">الشركة</th>
-                    <th className="py-3 px-3 text-start">السعر (TND)</th>
-                    <th className="py-3 px-3 text-start">المخزون</th>
-                    <th className="py-3 px-3 text-start">الحالة</th>
-                    <th className="py-3 px-3 text-start">إجراءات</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {filteredProducts.map(prod => (
-                    <tr key={prod.id} className="hover:bg-slate-50">
-                      <td className="py-2.5 px-3">
-                        <img 
-                          src={prod.images[0]} 
-                          alt="thumb" 
-                          referrerPolicy="no-referrer"
-                          className="w-12 h-12 rounded-lg object-cover bg-slate-100 border border-slate-200" 
-                        />
-                      </td>
-                      <td className="py-2.5 px-3 max-w-xs">
-                        <p className="font-bold text-slate-900 truncate">{prod.name.ar}</p>
-                        <p className="text-[11px] text-slate-400 truncate">{prod.name.fr}</p>
-                      </td>
-                      <td className="py-2.5 px-3 font-semibold text-slate-700">{prod.companyName}</td>
-                      <td className="py-2.5 px-3 font-black text-[#FF6B00] tabular-nums">
-                        {prod.price.toFixed(3)} {t.cart.currency}
-                      </td>
-                      <td className="py-2.5 px-3">
-                        <span className={`font-bold tabular-nums ${prod.stock <= 5 ? 'text-amber-600' : 'text-slate-800'}`}>
-                          {prod.stock} قطع
-                        </span>
-                      </td>
-                      <td className="py-2.5 px-3">
-                        <button
-                          onClick={() => toggleProductActive(prod.id)}
-                          className={`px-2 py-0.5 rounded-full font-bold text-[10px] flex items-center gap-1 ${
-                            prod.active ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'
-                          }`}
-                        >
-                          {prod.active ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
-                          <span>{prod.active ? 'معروض' : 'موقف مؤقتاً'}</span>
-                        </button>
-                      </td>
-                      <td className="py-2.5 px-3">
-                        <div className="flex items-center gap-1.5">
-                          <button
-                            onClick={() => openEditModal(prod)}
-                            className="p-1.5 rounded-lg border border-slate-200 hover:bg-slate-100 text-slate-700"
-                            title="تعديل"
-                          >
-                            <Edit className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            onClick={() => {
-                              if (confirm('هل أنت متأكد من حذف هذا المنتج؟')) {
-                                deleteProduct(prod.id);
-                              }
-                            }}
-                            className="p-1.5 rounded-lg border border-slate-200 hover:bg-red-50 text-red-600"
-                            title="حذف"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              {/* Form 2: Modify Sovereign Phone */}
+              <form onSubmit={handleSavePhone} className="bg-white dark:bg-[#0F172A] p-4 rounded-2xl border border-[#E2E8F0] dark:border-slate-700 space-y-3">
+                <label className="text-xs font-bold block">
+                  رقم الهاتف السيادي المعتمد:
+                </label>
+                <div className="relative">
+                  <Phone className="w-4 h-4 text-slate-400 absolute right-3 top-3" />
+                  <input
+                    type="text"
+                    value={editOwnerPhone}
+                    onChange={e => setEditOwnerPhone(e.target.value)}
+                    dir="ltr"
+                    required
+                    placeholder="+21621511162"
+                    className="w-full text-xs py-2.5 pr-9 pl-3 rounded-xl border border-slate-300 dark:border-slate-600 bg-transparent text-[#0F172A] dark:text-white font-mono focus:border-[#FF6B00] outline-none"
+                  />
+                </div>
+                <div className="flex items-center justify-between pt-1">
+                  <button
+                    type="submit"
+                    className="px-4 py-2 rounded-xl bg-[#0F172A] dark:bg-slate-700 hover:bg-[#FF6B00] text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer active:scale-95"
+                  >
+                    <Save className="w-3.5 h-3.5" />
+                    <span>حفظ فوري للهاتف</span>
+                  </button>
+                  {phoneSavedSuccess && (
+                    <span className="text-[11px] font-bold text-emerald-600 flex items-center gap-1">
+                      <Check className="w-3.5 h-3.5" />
+                      <span>تم التحديث بنجاح</span>
+                    </span>
+                  )}
+                </div>
+              </form>
+
             </div>
           </div>
 
-          {/* Add / Edit Product Modal */}
-          {showAddProdModal && (
-            <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
-              <div className="bg-white rounded-3xl w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6 space-y-4">
-                <div className="flex justify-between items-center border-b pb-3">
-                  <h3 className="text-base font-bold text-slate-900">
-                    {editingProd ? 'تعديل بيانات المنتج' : t.admin.addProduct}
-                  </h3>
-                  <button onClick={() => setShowAddProdModal(false)} className="p-1 text-slate-400 hover:text-slate-700">
-                    ✕
+          {/* Card 2: Change Secret Passcode / Room Lock */}
+          <div className="bg-[#F8FAFC] dark:bg-[#1E293B] rounded-3xl p-4 sm:p-6 border border-[#E2E8F0] dark:border-slate-800 space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-700">
+              <div className="flex items-center gap-2">
+                <Lock className="w-4 h-4 text-[#FF6B00]" />
+                <h3 className="text-sm font-black">تغيير رمز الدخول السري لغرفة المالك</h3>
+              </div>
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300">
+                SHA-256 Encrypted
+              </span>
+            </div>
+
+            <form onSubmit={handleChangeSecretCode} className="space-y-4">
+              
+              {/* Type Selection */}
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setLockType('pin')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold cursor-pointer transition-colors ${
+                    lockType === 'pin' ? 'bg-[#FF6B00] text-white' : 'bg-white dark:bg-[#0F172A] border border-slate-300 dark:border-slate-700'
+                  }`}
+                >
+                  رمز رقمي (PIN Code)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLockType('pattern')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold cursor-pointer transition-colors ${
+                    lockType === 'pattern' ? 'bg-[#FF6B00] text-white' : 'bg-white dark:bg-[#0F172A] border border-slate-300 dark:border-slate-700'
+                  }`}
+                >
+                  نمط الأمان (Pattern)
+                </button>
+              </div>
+
+              {secretChangeStep === 1 ? (
+                <div className="space-y-2 bg-white dark:bg-[#0F172A] p-4 rounded-2xl border border-slate-200 dark:border-slate-700">
+                  <label className="text-xs font-bold block">
+                    الخطوة 1: أدخل رمز الدخول الحالي للمتابعة:
+                  </label>
+                  <input
+                    type="password"
+                    value={currentSecretInput}
+                    onChange={e => setCurrentSecretInput(e.target.value)}
+                    placeholder="الرمز الحالي..."
+                    className="w-full text-xs py-2 px-3 rounded-xl border border-slate-300 dark:border-slate-600 bg-transparent text-[#0F172A] dark:text-white outline-none focus:border-[#FF6B00]"
+                  />
+                  <button
+                    type="submit"
+                    disabled={isChangingPasscode}
+                    className="mt-2 px-4 py-2 rounded-xl bg-[#0F172A] dark:bg-slate-700 hover:bg-[#FF6B00] text-white text-xs font-bold cursor-pointer"
+                  >
+                    {isChangingPasscode ? 'جارٍ التحقق...' : 'التحقق والمتابعة للرمز الجديد ←'}
                   </button>
                 </div>
-
-                <form onSubmit={handleSaveProduct} className="space-y-4">
-                  <div className="space-y-2">
-                    <label className="block text-xs font-bold text-slate-700">{t.admin.productNameAr} *</label>
-                    <input
-                      type="text"
-                      required
-                      value={prodNameAr}
-                      onChange={e => setProdNameAr(e.target.value)}
-                      placeholder="اسم المنتج بالعربية"
-                      className="w-full text-xs py-2 px-3 rounded-xl border border-slate-300"
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700">{t.admin.productNameFr}</label>
-                      <input
-                        type="text"
-                        value={prodNameFr}
-                        onChange={e => setProdNameFr(e.target.value)}
-                        placeholder="Nom en français"
-                        className="w-full text-xs py-2 px-3 rounded-xl border border-slate-300"
-                        dir="ltr"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700">{t.admin.productNameEn}</label>
-                      <input
-                        type="text"
-                        value={prodNameEn}
-                        onChange={e => setProdNameEn(e.target.value)}
-                        placeholder="Name in English"
-                        className="w-full text-xs py-2 px-3 rounded-xl border border-slate-300"
-                        dir="ltr"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700">{t.admin.priceTND} *</label>
-                      <input
-                        type="number"
-                        step="0.001"
-                        required
-                        value={prodPrice}
-                        onChange={e => setProdPrice(e.target.value)}
-                        className="w-full text-xs py-2 px-3 rounded-xl border border-slate-300"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700">{t.admin.originalPriceTND}</label>
-                      <input
-                        type="number"
-                        step="0.001"
-                        value={prodOriginalPrice}
-                        onChange={e => setProdOriginalPrice(e.target.value)}
-                        placeholder="اختياري لنسبة الخصم"
-                        className="w-full text-xs py-2 px-3 rounded-xl border border-slate-300"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700">{t.admin.stockQty} *</label>
-                      <input
-                        type="number"
-                        required
-                        value={prodStock}
-                        onChange={e => setProdStock(e.target.value)}
-                        className="w-full text-xs py-2 px-3 rounded-xl border border-slate-300"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700">{t.admin.category}</label>
-                      <select
-                        value={prodCategory}
-                        onChange={e => setProdCategory(e.target.value)}
-                        className="w-full text-xs py-2 px-3 rounded-xl border border-slate-300 bg-white"
-                      >
-                        <option value="power_tools">معدات كهربائية</option>
-                        <option value="auto_parts">قطع غيار سيارات</option>
-                        <option value="electronics">إلكترونيات وقياس</option>
-                        <option value="industrial">معدات صناعية</option>
-                        <option value="smart_home">أجهزة ذكية</option>
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700">{t.admin.companySelect}</label>
-                      <select
-                        value={prodCompanyId}
-                        onChange={e => setProdCompanyId(e.target.value)}
-                        className="w-full text-xs py-2 px-3 rounded-xl border border-slate-300 bg-white"
-                      >
-                        {companies.map(c => (
-                          <option key={c.id} value={c.id}>{c.name}</option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700">{t.admin.originGovSelect}</label>
-                      <select
-                        value={prodGov}
-                        onChange={e => setProdGov(e.target.value)}
-                        className="w-full text-xs py-2 px-3 rounded-xl border border-slate-300 bg-white"
-                      >
-                        {TUNISIAN_GOVERNORATES.map(g => (
-                          <option key={g.id} value={g.id}>{g.nameAr}</option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700">{t.admin.imageUrls}</label>
-                    <textarea
-                      rows={2}
-                      value={prodImagesText}
-                      onChange={e => setProdImagesText(e.target.value)}
-                      placeholder="/src/assets/images/..."
-                      className="w-full text-xs py-2 px-3 rounded-xl border border-slate-300"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700">الوصف التفصيلي</label>
-                    <textarea
-                      rows={3}
-                      value={prodDescAr}
-                      onChange={e => setProdDescAr(e.target.value)}
-                      className="w-full text-xs py-2 px-3 rounded-xl border border-slate-300"
-                    />
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      id="featCheck"
-                      checked={prodFeatured}
-                      onChange={e => setProdFeatured(e.target.checked)}
-                      className="accent-[#FF6B00]"
-                    />
-                    <label htmlFor="featCheck" className="text-xs font-bold text-slate-700">
-                      {t.admin.featuredStatus}
+              ) : (
+                <div className="space-y-3 bg-white dark:bg-[#0F172A] p-4 rounded-2xl border border-slate-200 dark:border-slate-700">
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold block">
+                      الخطوة 2: أدخل الرمز الجديد المطلوب:
                     </label>
+                    <input
+                      type="password"
+                      value={newSecretInput}
+                      onChange={e => setNewSecretInput(e.target.value)}
+                      placeholder="الرمز الجديد..."
+                      className="w-full text-xs py-2 px-3 rounded-xl border border-slate-300 dark:border-slate-600 bg-transparent text-[#0F172A] dark:text-white outline-none focus:border-[#FF6B00]"
+                    />
                   </div>
 
-                  <div className="flex justify-end gap-2 pt-3 border-t">
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold block">
+                      تأكيد الرمز الجديد:
+                    </label>
+                    <input
+                      type="password"
+                      value={confirmSecretInput}
+                      onChange={e => setConfirmSecretInput(e.target.value)}
+                      placeholder="أعد إدخال الرمز الجديد للتأكيد..."
+                      className="w-full text-xs py-2 px-3 rounded-xl border border-slate-300 dark:border-slate-600 bg-transparent text-[#0F172A] dark:text-white outline-none focus:border-[#FF6B00]"
+                    />
+                  </div>
+
+                  <div className="flex items-center gap-2 pt-2">
+                    <button
+                      type="submit"
+                      disabled={isChangingPasscode}
+                      className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Save className="w-3.5 h-3.5" />
+                      <span>{isChangingPasscode ? 'جارٍ الحفظ...' : 'حفظ وتشفير الرمز الجديد'}</span>
+                    </button>
                     <button
                       type="button"
-                      onClick={() => setShowAddProdModal(false)}
-                      className="px-4 py-2 text-xs text-slate-600 rounded-xl hover:bg-slate-100"
+                      onClick={() => setSecretChangeStep(1)}
+                      className="px-3 py-2 rounded-xl text-xs font-bold text-slate-500 hover:text-slate-800 dark:hover:text-white"
                     >
                       إلغاء
                     </button>
-                    <button
-                      type="submit"
-                      className="px-5 py-2 bg-[#FF6B00] hover:bg-[#e05e00] text-white text-xs font-bold rounded-xl shadow-xs"
-                    >
-                      {t.admin.saveChanges}
-                    </button>
                   </div>
-                </form>
-              </div>
-            </div>
-          )}
+                </div>
+              )}
+
+              {secretSuccessMessage && (
+                <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl text-xs text-emerald-600 font-bold flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>{secretSuccessMessage}</span>
+                </div>
+              )}
+
+              {secretErrorMessage && (
+                <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-2xl text-xs text-red-600 font-bold flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-red-600 shrink-0" />
+                  <span>{secretErrorMessage}</span>
+                </div>
+              )}
+
+            </form>
+          </div>
 
         </div>
       )}
 
-      {/* TAB 3: COMPANIES MANAGEMENT */}
-      {activeTab === 'companies' && (
-        <PartnersManager />
-      )}
-
-      {/* TAB MASTER: MASTER PARTNERS & PRODUCTS MANAGER */}
-      {activeTab === 'master' && (
-        <OwnerDashboardMaster />
-      )}
-
-      {/* TAB 4: ORDERS MANAGEMENT */}
-      {activeTab === 'orders' && (
+      {/* Tab 3: Products Management */}
+      {activeTab === 'products' && (
         <div className="space-y-4">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-white p-4 rounded-2xl border border-slate-200">
-            <div className="flex items-center gap-2 flex-1 w-full sm:max-w-md">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5">
+            <div className="relative flex-1">
+              <Search className="w-4 h-4 text-slate-400 absolute right-3 top-3" />
               <input
                 type="text"
-                placeholder="بحث برقم التتبع أو اسم أو هاتف الحريف..."
-                value={orderSearch}
-                onChange={e => setOrderSearch(e.target.value)}
-                className="w-full text-xs py-2 px-3 rounded-xl border border-slate-300"
+                placeholder="ابحث بالاسم أو الشركة..."
+                value={prodSearch}
+                onChange={e => setProdSearch(e.target.value)}
+                className="w-full text-xs py-2.5 pr-9 pl-3 rounded-2xl border border-[#E2E8F0] dark:border-slate-800 bg-[#F8FAFC] dark:bg-[#1E293B] text-[#0F172A] dark:text-white outline-none focus:border-[#FF6B00]"
               />
             </div>
+            <button
+              type="button"
+              onClick={() => {
+                setEditingProd(null);
+                setShowAddProdModal(true);
+              }}
+              className="px-4 py-2.5 rounded-2xl bg-[#FF6B00] hover:bg-[#E05E00] text-white text-xs font-bold flex items-center justify-center gap-1.5 shadow-xs cursor-pointer active:scale-95 shrink-0"
+            >
+              <Plus className="w-4 h-4" />
+              <span>+ إضافة منتج جديد</span>
+            </button>
+          </div>
 
-            <div className="flex items-center gap-2">
-              <select
-                value={statusFilter}
-                onChange={e => setStatusFilter(e.target.value)}
-                className="text-xs py-2 px-3 rounded-xl border border-slate-300 bg-white"
-              >
-                <option value="all">كافة الحالات</option>
-                <option value="new">جديد</option>
-                <option value="under_confirmation">قيد التأكيد</option>
-                <option value="preparing">قيد التحضير</option>
-                <option value="out_for_delivery">خرج للتوصيل</option>
-                <option value="delivered">تم التسليم</option>
-                <option value="cancelled">ملغى</option>
-              </select>
+          {/* Products List Mobile Cards */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {filteredProducts.map(p => {
+              const prodName = p.name[language] || p.name.ar;
+              return (
+                <div 
+                  key={p.id}
+                  className="p-3 rounded-2xl bg-[#F8FAFC] dark:bg-[#1E293B] border border-[#E2E8F0] dark:border-slate-800 flex items-center justify-between gap-3 shadow-2xs"
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <img 
+                      src={p.images[0] || '/assets/aistudio/file_0000000048188243bc0b721218c854fc_ea3ea21d.png'}
+                      alt={prodName}
+                      className="w-14 h-14 rounded-xl object-contain bg-white dark:bg-[#0F172A] border border-slate-200 dark:border-slate-700 p-1 shrink-0"
+                    />
+                    <div className="min-w-0">
+                      <h4 className="text-xs font-bold text-[#0F172A] dark:text-white truncate">
+                        {prodName}
+                      </h4>
+                      <span className="text-[10px] text-slate-500 dark:text-slate-400 block truncate">
+                        {p.companyName} • {p.stock > 0 ? `المخزون: ${p.stock}` : 'نفد المخزون'}
+                      </span>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <span className="text-xs font-black text-[#FF6B00] font-mono">
+                          {p.price.toFixed(3)} د.ت
+                        </span>
+                        {p.originalPrice && p.originalPrice > p.price && (
+                          <span className="text-[10px] text-slate-400 line-through">
+                            {p.originalPrice.toFixed(3)}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
 
-              <button
-                onClick={exportOrdersCSV}
-                className="px-3.5 py-2 rounded-xl bg-slate-900 text-white text-xs font-bold flex items-center gap-1.5 hover:bg-slate-800"
-              >
-                <Download className="w-3.5 h-3.5" />
-                <span>{t.admin.exportCSV}</span>
-              </button>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => toggleProductActive(p.id)}
+                      className={`p-1.5 rounded-lg border text-xs cursor-pointer ${
+                        p.active ? 'bg-emerald-500/10 text-emerald-600 border-emerald-500/30' : 'bg-slate-200 dark:bg-slate-700 text-slate-500'
+                      }`}
+                      title={p.active ? 'نشط بالمتجر' : 'معطل'}
+                    >
+                      {p.active ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => openEditProduct(p)}
+                      className="p-1.5 rounded-lg bg-blue-500/10 text-blue-600 border border-blue-500/20 hover:bg-blue-500/20 cursor-pointer"
+                      title="تعديل المنتج"
+                    >
+                      <Edit className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDeleteConfirmModal({
+                        isOpen: true,
+                        type: 'product',
+                        id: p.id,
+                        title: prodName
+                      })}
+                      className="p-1.5 rounded-lg bg-red-500/10 text-red-600 border border-red-500/20 hover:bg-red-500/20 cursor-pointer"
+                      title="حذف المنتج"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Tab 4: Categories & Chips */}
+      {activeTab === 'categories' && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <h3 className="text-sm font-black">أقسام وتصنيفات المتجر</h3>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">التعديلات هنا تحدث شريط التصنيفات العلوي والشاشة فوراُ</p>
             </div>
+            <button
+              type="button"
+              onClick={() => setShowAddCategoryModal(true)}
+              className="px-3.5 py-2 rounded-2xl bg-[#FF6B00] hover:bg-[#E05E00] text-white text-xs font-bold flex items-center gap-1 shadow-xs cursor-pointer active:scale-95"
+            >
+              <Plus className="w-4 h-4" />
+              <span>+ إضافة قسم</span>
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5">
+            {categories.map(c => {
+              const count = c.id === 'all' 
+                ? products.length 
+                : products.filter(p => p.category === c.id).length;
+
+              return (
+                <div
+                  key={c.id}
+                  className="p-3 rounded-2xl bg-[#F8FAFC] dark:bg-[#1E293B] border border-[#E2E8F0] dark:border-slate-800 flex items-center justify-between gap-2"
+                >
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <span className="text-xl w-8 h-8 rounded-xl bg-white dark:bg-[#0F172A] flex items-center justify-center border border-slate-200 dark:border-slate-700 shrink-0">
+                      {c.icon || '📦'}
+                    </span>
+                    <div className="min-w-0">
+                      <span className="text-xs font-black block truncate">{c.label}</span>
+                      <span className="text-[10px] text-slate-500 dark:text-slate-400 block truncate">
+                        {count} منتج مسجل
+                      </span>
+                    </div>
+                  </div>
+
+                  {c.id !== 'all' && (
+                    <button
+                      type="button"
+                      onClick={() => setDeleteConfirmModal({
+                        isOpen: true,
+                        type: 'category',
+                        id: c.id,
+                        title: c.label
+                      })}
+                      className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-500/10 cursor-pointer transition-colors"
+                      title="حذف هذا القسم"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Tab 5: Partners & Brands */}
+      {activeTab === 'partners' && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <h3 className="text-sm font-black">الشركاء والموزعون والعلامات</h3>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">إدارة العلامات التجارية الشريكة لمتجر ECHOX</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowAddPartnerModal(true)}
+              className="px-3.5 py-2 rounded-2xl bg-[#FF6B00] hover:bg-[#E05E00] text-white text-xs font-bold flex items-center gap-1 shadow-xs cursor-pointer active:scale-95"
+            >
+              <Plus className="w-4 h-4" />
+              <span>+ إضافة شريك</span>
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {companies.map(comp => (
+              <div
+                key={comp.id}
+                className="p-3.5 rounded-2xl bg-[#F8FAFC] dark:bg-[#1E293B] border border-[#E2E8F0] dark:border-slate-800 flex items-center justify-between gap-3 shadow-2xs"
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  <img
+                    src={comp.logo || '/assets/aistudio/file_0000000048188243bc0b721218c854fc_ea3ea21d.png'}
+                    alt={comp.name}
+                    className="w-12 h-12 rounded-xl object-contain bg-white dark:bg-[#0F172A] border border-slate-200 dark:border-slate-700 p-1 shrink-0"
+                  />
+                  <div className="min-w-0">
+                    <h4 className="text-xs font-bold text-[#0F172A] dark:text-white truncate">
+                      {comp.name}
+                    </h4>
+                    <span className="text-[10px] text-slate-500 dark:text-slate-400 block font-mono">
+                      {comp.phone} • {comp.governorate}
+                    </span>
+                    <span className="text-[10px] text-slate-400 truncate block mt-0.5">
+                      {comp.email}
+                    </span>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setDeleteConfirmModal({
+                    isOpen: true,
+                    type: 'partner',
+                    id: comp.id,
+                    title: comp.name
+                  })}
+                  className="p-2 rounded-xl bg-red-500/10 text-red-600 hover:bg-red-500/20 cursor-pointer"
+                  title="حذف هذا الشريك"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Tab 6: Banners & Promos */}
+      {activeTab === 'banners' && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <h3 className="text-sm font-black">العروض والبانرات الإعلانية</h3>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">تظهر البانرات النشطة مباشرة في أعلى واجهة المتجر الرئيسية</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowAddBannerModal(true)}
+              className="px-3.5 py-2 rounded-2xl bg-[#FF6B00] hover:bg-[#E05E00] text-white text-xs font-bold flex items-center gap-1 shadow-xs cursor-pointer active:scale-95"
+            >
+              <Plus className="w-4 h-4" />
+              <span>+ إضافة بانر</span>
+            </button>
           </div>
 
           <div className="space-y-3">
-            {filteredOrders.map(ord => (
-              <div key={ord.id} className="bg-white rounded-2xl border border-slate-200 p-5 space-y-4 shadow-xs">
-                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="font-mono font-black text-sm text-[#FF6B00]">{ord.trackingNumber}</span>
-                      <span className="text-xs bg-slate-100 text-slate-800 px-2 py-0.5 rounded-full font-bold">
-                        {t.orderStatus[ord.status] || ord.status}
-                      </span>
-                    </div>
-                    <p className="text-xs text-slate-500 mt-0.5">
-                      الحريف: <strong>{ord.customerName}</strong> · هاتف: <span dir="ltr">{ord.customerPhone}</span>
-                    </p>
-                  </div>
-
-                  {/* Status Selector */}
+            {banners.map(b => (
+              <div
+                key={b.id}
+                className="p-3.5 rounded-3xl bg-[#F8FAFC] dark:bg-[#1E293B] border border-[#E2E8F0] dark:border-slate-800 space-y-3"
+              >
+                {/* Banner Preview */}
+                <div className={`rounded-2xl bg-gradient-to-r ${b.bgGradient || 'from-[#FF6B00] via-[#F97316] to-[#EA580C]'} text-white p-3 shadow-xs flex items-center justify-between gap-2`}>
                   <div className="flex items-center gap-2">
-                    <span className="text-xs font-bold text-slate-600">تغيير الحالة:</span>
-                    <select
-                      value={ord.status}
-                      onChange={e => updateOrderStatus(ord.id, e.target.value as OrderStatus, adminNoteInput[ord.id])}
-                      className="text-xs py-1.5 px-3 rounded-xl border border-slate-300 bg-white font-bold"
+                    <Sparkles className="w-4 h-4 text-white" />
+                    <div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[9px] font-black uppercase bg-white text-[#FF6B00] px-2 py-0.5 rounded-full">
+                          {b.tag}
+                        </span>
+                        <span className="text-xs font-black">{b.title}</span>
+                      </div>
+                      <p className="text-[10px] text-white/90 mt-0.5">{b.subtitle}</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Banner Actions */}
+                <div className="flex items-center justify-between pt-1">
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => toggleBannerActive(b.id)}
+                      className={`px-3 py-1 rounded-full text-xs font-bold cursor-pointer transition-colors ${
+                        b.active ? 'bg-emerald-500/20 text-emerald-600' : 'bg-slate-200 dark:bg-slate-700 text-slate-500'
+                      }`}
                     >
-                      <option value="new">جديد</option>
-                      <option value="under_confirmation">قيد التأكيد</option>
-                      <option value="preparing">قيد التحضير</option>
-                      <option value="out_for_delivery">خرج للتوصيل</option>
-                      <option value="delivered">تم التسليم</option>
-                      <option value="cancelled">ملغى</option>
-                    </select>
-                  </div>
-                </div>
-
-                {/* Items & Address */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs text-slate-600">
-                  <div className="space-y-1">
-                    <p><strong>الولاية:</strong> {getGovernorateName(ord.shippingAddress.governorate, language)} ({ord.shippingAddress.city})</p>
-                    <p><strong>العنوان:</strong> {ord.shippingAddress.street}</p>
-                    {ord.notes && <p className="text-amber-700"><strong>ملاحظات الحريف:</strong> {ord.notes}</p>}
+                      {b.active ? 'نشط بالواجهة ✓' : 'معطل'}
+                    </button>
                   </div>
 
-                  <div className="space-y-1 text-end sm:text-start">
-                    <p><strong>القطع المطلوبة:</strong> {ord.items.map(i => `${i.productName.ar} (×${i.quantity})`).join(', ')}</p>
-                    <p><strong>المبلغ الإجمالي:</strong> <span className="font-black text-[#FF6B00] text-sm tabular-nums">{ord.totalAmount.toFixed(3)} {t.cart.currency}</span></p>
-                    <p><strong>طريقة الدفع:</strong> {ord.paymentMethod === 'cod' ? 'دفع عند الاستلام نقداً' : ord.paymentMethod}</p>
-                  </div>
-                </div>
-
-                {/* Add admin note field */}
-                <div className="flex gap-2 pt-2 border-t border-slate-100">
-                  <input
-                    type="text"
-                    placeholder="إضافة ملاحظة إدارية لهذه الحالة (تظهر في سجل التتبع للحريف)..."
-                    value={adminNoteInput[ord.id] || ''}
-                    onChange={e => setAdminNoteInput({ ...adminNoteInput, [ord.id]: e.target.value })}
-                    className="flex-1 text-xs py-1.5 px-3 rounded-xl border border-slate-200"
-                  />
                   <button
-                    onClick={() => {
-                      if (adminNoteInput[ord.id]) {
-                        updateOrderStatus(ord.id, ord.status, adminNoteInput[ord.id]);
-                        setAdminNoteInput({ ...adminNoteInput, [ord.id]: '' });
-                      }
-                    }}
-                    className="px-3 py-1.5 bg-slate-800 text-white text-xs font-bold rounded-xl hover:bg-slate-900"
+                    type="button"
+                    onClick={() => setDeleteConfirmModal({
+                      isOpen: true,
+                      type: 'banner',
+                      id: b.id,
+                      title: b.title
+                    })}
+                    className="p-1.5 rounded-xl text-red-600 hover:bg-red-500/10 cursor-pointer"
+                    title="حذف هذا البانر"
                   >
-                    حفظ الملاحظة
+                    <Trash2 className="w-4 h-4" />
                   </button>
                 </div>
               </div>
@@ -993,208 +1318,625 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
         </div>
       )}
 
-      {/* TAB 5: SUPPORT & MESSAGES */}
-      {activeTab === 'support' && (
+      {/* Tab 7: Orders & Sales */}
+      {activeTab === 'orders' && (
         <div className="space-y-4">
-          <div className="bg-white p-4 rounded-2xl border border-slate-200">
-            <h2 className="text-sm font-bold text-slate-900">رسائل واستفسارات الحرفاء الواردة</h2>
-            <p className="text-xs text-slate-500">الردود تصل مباشرة للحريف في صفحة المحادثة والدعم</p>
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5">
+            <div className="relative flex-1">
+              <Search className="w-4 h-4 text-slate-400 absolute right-3 top-3" />
+              <input
+                type="text"
+                placeholder="ابحث برقم التتبع أو اسم الحريف أو الهاتف..."
+                value={orderSearch}
+                onChange={e => setOrderSearch(e.target.value)}
+                className="w-full text-xs py-2.5 pr-9 pl-3 rounded-2xl border border-[#E2E8F0] dark:border-slate-800 bg-[#F8FAFC] dark:bg-[#1E293B] text-[#0F172A] dark:text-white outline-none focus:border-[#FF6B00]"
+              />
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setShowAddManualOrderModal(true)}
+                className="px-3.5 py-2.5 rounded-2xl bg-[#FF6B00] hover:bg-[#E05E00] text-white text-xs font-bold flex items-center justify-center gap-1.5 shadow-xs cursor-pointer active:scale-95 shrink-0"
+              >
+                <Plus className="w-4 h-4" />
+                <span>+ تسجيل طلب يدوي</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={exportOrdersCSV}
+                className="p-2.5 rounded-2xl bg-[#F8FAFC] dark:bg-[#1E293B] border border-[#E2E8F0] dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:text-[#0F172A] dark:hover:text-white cursor-pointer"
+                title="تصدير CSV"
+              >
+                <Download className="w-4 h-4" />
+              </button>
+            </div>
           </div>
 
-          <div className="space-y-4">
-            {inquiries.map(inq => (
-              <div key={inq.id} className="bg-white rounded-2xl border border-slate-200 p-5 space-y-3 shadow-xs">
-                <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-                  <div>
-                    <h3 className="font-bold text-sm text-slate-900">{inq.subject}</h3>
-                    <p className="text-xs text-slate-500">
-                      من: <strong>{inq.senderName}</strong> · هاتف: <span dir="ltr">{inq.phone}</span> · بريد: <span dir="ltr">{inq.email}</span>
+          {/* Status Filter Chips */}
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
+            {['all', 'new', 'under_confirmation', 'preparing', 'out_for_delivery', 'delivered', 'cancelled'].map(st => (
+              <button
+                key={st}
+                type="button"
+                onClick={() => setOrderStatusFilter(st)}
+                className={`px-3 py-1 rounded-full text-xs font-bold shrink-0 transition-all cursor-pointer ${
+                  orderStatusFilter === st
+                    ? 'bg-[#0F172A] dark:bg-white text-white dark:text-[#0F172A]'
+                    : 'bg-[#F8FAFC] dark:bg-[#1E293B] text-slate-600 dark:text-slate-300 border border-[#E2E8F0] dark:border-slate-800'
+                }`}
+              >
+                {st === 'all' ? 'كافة الحالات' : st}
+              </button>
+            ))}
+          </div>
+
+          {/* Orders Cards */}
+          <div className="space-y-3">
+            {filteredOrders.length === 0 ? (
+              <div className="p-8 text-center bg-[#F8FAFC] dark:bg-[#1E293B] rounded-3xl border border-[#E2E8F0] dark:border-slate-800 text-xs text-slate-500">
+                لا توجد طلبات مطابقة للبحث أو الفلتر
+              </div>
+            ) : (
+              filteredOrders.map(o => (
+                <div
+                  key={o.id}
+                  className="p-4 rounded-3xl bg-[#F8FAFC] dark:bg-[#1E293B] border border-[#E2E8F0] dark:border-slate-800 space-y-3 shadow-2xs"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-black font-mono bg-white dark:bg-[#0F172A] px-2.5 py-1 rounded-xl border border-slate-200 dark:border-slate-700">
+                        {o.trackingNumber}
+                      </span>
+                      <span className="text-[10px] text-slate-400 font-mono">
+                        {new Date(o.createdAt).toLocaleDateString('ar-TN')}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-sm font-black text-[#FF6B00] font-mono">
+                        {o.totalAmount.toFixed(3)} د.ت
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setDeleteConfirmModal({
+                          isOpen: true,
+                          type: 'order',
+                          id: o.id,
+                          title: `الطلب ${o.trackingNumber} (${o.customerName})`
+                        })}
+                        className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-500/10 cursor-pointer"
+                        title="حذف هذا الطلب"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="text-xs space-y-1 pt-1">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold">{o.customerName}</span>
+                      <a href={`tel:${o.customerPhone}`} dir="ltr" className="font-mono text-[#FF6B00] hover:underline">
+                        {o.customerPhone}
+                      </a>
+                    </div>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                      {o.shippingAddress?.governorate ? `ولاية ${o.shippingAddress.governorate}` : ''} • {o.shippingAddress?.city || ''}
                     </p>
                   </div>
-                  <span className="text-[11px] text-slate-400 font-mono">
-                    {new Date(inq.createdAt).toLocaleDateString('ar-TN')}
-                  </span>
-                </div>
 
-                <p className="text-xs sm:text-sm text-slate-700 bg-slate-50 p-3 rounded-xl border border-slate-100">
-                  {inq.message}
-                </p>
-
-                {inq.reply ? (
-                  <div className="p-3 bg-emerald-50 text-emerald-900 rounded-xl border border-emerald-200 text-xs space-y-1">
-                    <p className="font-bold text-emerald-800">تم إرسال رد المالك:</p>
-                    <p>{inq.reply}</p>
-                  </div>
-                ) : (
-                  <div className="flex gap-2 pt-2">
-                    <input
-                      type="text"
-                      placeholder="اكتب ردك للحريف هنا..."
-                      value={replyInputs[inq.id] || ''}
-                      onChange={e => setReplyInputs({ ...replyInputs, [inq.id]: e.target.value })}
-                      className="flex-1 text-xs py-2 px-3 rounded-xl border border-slate-300"
-                    />
-                    <button
-                      onClick={() => {
-                        if (replyInputs[inq.id]) {
-                          replyToInquiry(inq.id, replyInputs[inq.id]);
-                          setReplyInputs({ ...replyInputs, [inq.id]: '' });
-                        }
-                      }}
-                      className="px-4 py-2 bg-[#FF6B00] hover:bg-[#e05e00] text-white text-xs font-bold rounded-xl flex items-center gap-1 shadow-xs"
+                  {/* Status Selection */}
+                  <div className="pt-2 border-t border-slate-200 dark:border-slate-700 flex items-center justify-between gap-2">
+                    <span className="text-[11px] font-bold text-slate-500">حالة الشحن:</span>
+                    <select
+                      value={o.status}
+                      onChange={e => updateOrderStatus(o.id, e.target.value as OrderStatus)}
+                      className="text-xs py-1 px-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-[#0F172A] font-bold text-[#0F172A] dark:text-white cursor-pointer"
                     >
-                      <Send className="w-3.5 h-3.5" />
-                      <span>{t.admin.replyMessage}</span>
-                    </button>
+                      <option value="new">جديد (New)</option>
+                      <option value="under_confirmation">قيد التأكيد (Confirmation)</option>
+                      <option value="preparing">قيد التجهيز (Preparing)</option>
+                      <option value="out_for_delivery">خرج للتسليم (Out for delivery)</option>
+                      <option value="delivered">تم التسليم (Delivered)</option>
+                      <option value="cancelled">ملغى (Cancelled)</option>
+                    </select>
                   </div>
-                )}
-              </div>
-            ))}
+                </div>
+              ))
+            )}
           </div>
         </div>
       )}
 
-      {/* TAB 6: SITE & OWNER SETTINGS */}
-      {activeTab === 'settings' && (
-        <form onSubmit={handleSaveSettings} className="bg-white rounded-3xl border border-slate-200 p-6 sm:p-8 space-y-6 shadow-xs">
-          
-          {settingsSavedMessage && (
-            <div className="p-4 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-2xl text-xs font-bold flex items-center gap-2">
-              <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
-              <span>{t.admin.siteSettingsSaved}</span>
+      {/* ========================================================= */}
+      {/* 5. Modals for Adding Entities */}
+      {/* ========================================================= */}
+
+      {/* Modal: Add/Edit Product */}
+      {showAddProdModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-black/60 backdrop-blur-xs animate-fadeIn overflow-y-auto">
+          <div className="w-full max-w-lg bg-white dark:bg-[#1E293B] rounded-3xl p-5 border border-slate-200 dark:border-slate-700 shadow-2xl space-y-4 my-auto max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-200 dark:border-slate-700">
+              <h3 className="text-sm font-black">
+                {editingProd ? 'تعديل بيانات المنتج' : '+ إضافة منتج جديد للكاتالوج'}
+              </h3>
+              <button onClick={() => setShowAddProdModal(false)} className="p-1 rounded-full text-slate-400 hover:text-slate-800 dark:hover:text-white">
+                <X className="w-4 h-4" />
+              </button>
             </div>
-          )}
 
-          {/* Section 1: Owner Sovereign Profile */}
-          <div className="space-y-4">
-            <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2 border-b pb-2">
-              <ShieldCheck className="w-4 h-4 text-[#FF6B00]" />
-              <span>بيانات وهوية المالك السيادية (ECHOX OWNER)</span>
-            </h3>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  حساب Google الدخول السيادي (🔒 للعرض فقط - غير قابل للتعديل):
-                </label>
+            <form onSubmit={handleSaveProduct} className="space-y-3">
+              <div className="space-y-1">
+                <label className="text-xs font-bold block">اسم المنتج بالعربية *</label>
                 <input
                   type="text"
-                  disabled
-                  value={ownerSettings.loginEmail}
-                  className="w-full text-xs py-2 px-3 rounded-xl bg-slate-100 border border-slate-300 text-slate-700 font-mono font-bold cursor-not-allowed"
-                  dir="ltr"
+                  required
+                  value={prodNameAr}
+                  onChange={e => setProdNameAr(e.target.value)}
+                  placeholder="مثال: مثقاب احترافي لاسلكي 20V..."
+                  className="w-full text-xs p-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-transparent"
                 />
               </div>
 
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  رقم الهاتف الأساسي السيادي (🔒 للعرض فقط - ثابت للأمان):
-                </label>
+              <div className="space-y-1">
+                <label className="text-xs font-bold block">اسم المنتج بالفرنسية (اختياري)</label>
                 <input
                   type="text"
-                  disabled
-                  value={ownerSettings.primaryPhone}
-                  className="w-full text-xs py-2 px-3 rounded-xl bg-slate-100 border border-slate-300 text-[#FF6B00] font-mono font-bold cursor-not-allowed"
-                  dir="ltr"
+                  value={prodNameFr}
+                  onChange={e => setProdNameFr(e.target.value)}
+                  placeholder="Ex: Perceuse Sans Fil 20V..."
+                  className="w-full text-xs p-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-transparent"
                 />
               </div>
 
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  رقم هاتف التواصل وواتساب الموقع (تحديث تلقائي لأزرار الاتصال):
-                </label>
-                <input
-                  type="tel"
-                  required
-                  value={secondaryPhone}
-                  onChange={e => setSecondaryPhone(e.target.value)}
-                  className="w-full text-xs py-2 px-3 rounded-xl border border-slate-300 font-mono"
-                  dir="ltr"
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1">
+                  <label className="text-xs font-bold block">السعر (د.ت) *</label>
+                  <input
+                    type="number"
+                    step="0.001"
+                    required
+                    value={prodPrice}
+                    onChange={e => setProdPrice(e.target.value)}
+                    placeholder="345.000"
+                    className="w-full text-xs p-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-transparent font-mono"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-bold block">السعر قبل التخفيض (اختياري)</label>
+                  <input
+                    type="number"
+                    step="0.001"
+                    value={prodOriginalPrice}
+                    onChange={e => setProdOriginalPrice(e.target.value)}
+                    placeholder="420.000"
+                    className="w-full text-xs p-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-transparent font-mono"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1">
+                  <label className="text-xs font-bold block">القسم / التصنيف *</label>
+                  <select
+                    value={prodCategory}
+                    onChange={e => setProdCategory(e.target.value)}
+                    className="w-full text-xs p-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-transparent font-bold"
+                  >
+                    {categories.filter(c => c.id !== 'all').map(c => (
+                      <option key={c.id} value={c.id} className="text-[#0F172A]">{c.label}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-bold block">الكمية المتوفرة بالمخزون</label>
+                  <input
+                    type="number"
+                    value={prodStock}
+                    onChange={e => setProdStock(e.target.value)}
+                    className="w-full text-xs p-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-transparent font-mono"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-bold block">الشركة المصنعة أو الموزعة</label>
+                <select
+                  value={prodCompanyId}
+                  onChange={e => setProdCompanyId(e.target.value)}
+                  className="w-full text-xs p-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-transparent font-bold"
+                >
+                  {companies.map(c => (
+                    <option key={c.id} value={c.id} className="text-[#0F172A]">{c.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-bold block">روابط الصور (رابط واحد في كل سطر)</label>
+                <textarea
+                  rows={2}
+                  value={prodImagesText}
+                  onChange={e => setProdImagesText(e.target.value)}
+                  placeholder="https://...&#10;https://..."
+                  className="w-full text-xs p-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-transparent font-mono"
                 />
               </div>
 
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  بريد التواصل الرسمي الظاهر للحرفاء:
-                </label>
-                <input
-                  type="email"
-                  required
-                  value={contactEmail}
-                  onChange={e => setContactEmail(e.target.value)}
-                  className="w-full text-xs py-2 px-3 rounded-xl border border-slate-300"
-                  dir="ltr"
+              <div className="space-y-1">
+                <label className="text-xs font-bold block">الوصف والمواصفات</label>
+                <textarea
+                  rows={2}
+                  value={prodDescAr}
+                  onChange={e => setProdDescAr(e.target.value)}
+                  placeholder="أدخل تفاصيل ومميزات المنتج والضمان..."
+                  className="w-full text-xs p-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-transparent"
                 />
               </div>
-            </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAddProdModal(false)}
+                  className="px-4 py-2 text-xs font-bold text-slate-500 hover:text-slate-800 dark:hover:text-white"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2.5 rounded-xl bg-[#FF6B00] hover:bg-[#E05E00] text-white text-xs font-bold shadow-xs cursor-pointer active:scale-95"
+                >
+                  {editingProd ? 'حفظ التعديلات' : 'إضافة المنتج فوراً'}
+                </button>
+              </div>
+            </form>
           </div>
-
-          {/* Section 2: Store Shipping & Announcement */}
-          <div className="space-y-4 pt-4 border-t border-slate-100">
-            <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2 border-b pb-2">
-              <ShoppingBag className="w-4 h-4 text-[#FF6B00]" />
-              <span>إعدادات الشحن والعروض</span>
-            </h3>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  تكلفة الشحن القياسية لكافة الولايات (TND):
-                </label>
-                <input
-                  type="number"
-                  step="0.5"
-                  value={shippingFee}
-                  onChange={e => setShippingFee(e.target.value)}
-                  className="w-full text-xs py-2 px-3 rounded-xl border border-slate-300 font-bold"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  الحد الأدنى للتوصيل المجاني (TND):
-                </label>
-                <input
-                  type="number"
-                  step="1"
-                  value={freeThreshold}
-                  onChange={e => setFreeThreshold(e.target.value)}
-                  className="w-full text-xs py-2 px-3 rounded-xl border border-slate-300 font-bold"
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">
-                نص الشريط العلوي للإعلانات:
-              </label>
-              <input
-                type="text"
-                value={siteAnnouncement}
-                onChange={e => setSiteAnnouncement(e.target.value)}
-                className="w-full text-xs py-2 px-3 rounded-xl border border-slate-300"
-              />
-            </div>
-          </div>
-
-          <div className="flex justify-end pt-4">
-            <button
-              type="submit"
-              className="px-6 py-3 bg-[#FF6B00] hover:bg-[#e05e00] text-white font-bold text-xs rounded-xl shadow-md flex items-center gap-2 cursor-pointer"
-            >
-              <Save className="w-4 h-4" />
-              <span>{t.admin.saveChanges}</span>
-            </button>
-          </div>
-
-        </form>
+        </div>
       )}
 
-      {/* TAB 7: SOVEREIGN SECURITY & PRIVACY (PHONE OS LOCK SETTINGS) */}
-      {activeTab === 'security' && (
-        <OwnerSecuritySettings onNavigate={navigate} />
+      {/* Modal: Add Category */}
+      {showAddCategoryModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-black/60 backdrop-blur-xs animate-fadeIn">
+          <div className="w-full max-w-sm bg-white dark:bg-[#1E293B] rounded-3xl p-5 border border-slate-200 dark:border-slate-700 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-200 dark:border-slate-700">
+              <h3 className="text-sm font-black">+ إضافة قسم جديد</h3>
+              <button onClick={() => setShowAddCategoryModal(false)} className="p-1 rounded-full text-slate-400">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveCategory} className="space-y-3">
+              <div className="space-y-1">
+                <label className="text-xs font-bold block">اسم القسم بالعربية *</label>
+                <input
+                  type="text"
+                  required
+                  value={catLabel}
+                  onChange={e => setCatLabel(e.target.value)}
+                  placeholder="مثال: مضخات ومحركات هيدروليكية..."
+                  className="w-full text-xs p-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-transparent"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-bold block">رمز الأيقونة (Emoji) *</label>
+                <input
+                  type="text"
+                  value={catIcon}
+                  onChange={e => setCatIcon(e.target.value)}
+                  placeholder="🔧"
+                  className="w-full text-sm p-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-transparent text-center"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-bold block">وصف القسم (اختياري)</label>
+                <input
+                  type="text"
+                  value={catDesc}
+                  onChange={e => setCatDesc(e.target.value)}
+                  placeholder="مضخات ضغط عالي معتمدة..."
+                  className="w-full text-xs p-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-transparent"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAddCategoryModal(false)}
+                  className="px-3 py-2 text-xs font-bold text-slate-500"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 rounded-xl bg-[#FF6B00] hover:bg-[#E05E00] text-white text-xs font-bold shadow-xs cursor-pointer active:scale-95"
+                >
+                  حفظ القسم
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Add Partner */}
+      {showAddPartnerModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-black/60 backdrop-blur-xs animate-fadeIn">
+          <div className="w-full max-w-sm bg-white dark:bg-[#1E293B] rounded-3xl p-5 border border-slate-200 dark:border-slate-700 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-200 dark:border-slate-700">
+              <h3 className="text-sm font-black">+ إضافة شريك / علامة تجارية</h3>
+              <button onClick={() => setShowAddPartnerModal(false)} className="p-1 rounded-full text-slate-400">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSavePartner} className="space-y-3">
+              <div className="space-y-1">
+                <label className="text-xs font-bold block">اسم الشركة / العلامة *</label>
+                <input
+                  type="text"
+                  required
+                  value={partnerName}
+                  onChange={e => setPartnerName(e.target.value)}
+                  placeholder="مثال: Tunis Outillage Pro..."
+                  className="w-full text-xs p-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-transparent"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-bold block">رقم الهاتف *</label>
+                <input
+                  type="text"
+                  required
+                  value={partnerPhone}
+                  onChange={e => setPartnerPhone(e.target.value)}
+                  placeholder="+216 71 000 000"
+                  className="w-full text-xs p-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-transparent font-mono"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-bold block">البريد الإلكتروني</label>
+                <input
+                  type="email"
+                  value={partnerEmail}
+                  onChange={e => setPartnerEmail(e.target.value)}
+                  placeholder="contact@company.tn"
+                  className="w-full text-xs p-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-transparent font-mono"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-bold block">رابط الشعار (Logo URL)</label>
+                <input
+                  type="text"
+                  value={partnerLogo}
+                  onChange={e => setPartnerLogo(e.target.value)}
+                  placeholder="https://..."
+                  className="w-full text-xs p-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-transparent font-mono"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAddPartnerModal(false)}
+                  className="px-3 py-2 text-xs font-bold text-slate-500"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 rounded-xl bg-[#FF6B00] hover:bg-[#E05E00] text-white text-xs font-bold shadow-xs cursor-pointer active:scale-95"
+                >
+                  حفظ الشريك
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Add Banner */}
+      {showAddBannerModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-black/60 backdrop-blur-xs animate-fadeIn">
+          <div className="w-full max-w-sm bg-white dark:bg-[#1E293B] rounded-3xl p-5 border border-slate-200 dark:border-slate-700 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-200 dark:border-slate-700">
+              <h3 className="text-sm font-black">+ إضافة بانر ترويجي</h3>
+              <button onClick={() => setShowAddBannerModal(false)} className="p-1 rounded-full text-slate-400">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveBanner} className="space-y-3">
+              <div className="space-y-1">
+                <label className="text-xs font-bold block">الشارة النصية (Tag)</label>
+                <input
+                  type="text"
+                  value={bannerTag}
+                  onChange={e => setBannerTag(e.target.value)}
+                  placeholder="عروض حصرية / تخفيضات الموسم..."
+                  className="w-full text-xs p-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-transparent"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-bold block">العنوان الترويجي *</label>
+                <input
+                  type="text"
+                  required
+                  value={bannerTitle}
+                  onChange={e => setBannerTitle(e.target.value)}
+                  placeholder="تخفيضات خاصة على معدات الورشات..."
+                  className="w-full text-xs p-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-transparent"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-bold block">الوصف الإضافي</label>
+                <input
+                  type="text"
+                  value={bannerSubtitle}
+                  onChange={e => setBannerSubtitle(e.target.value)}
+                  placeholder="شحن سريع لكافة الـ24 ولاية والدفع عند الاستلام..."
+                  className="w-full text-xs p-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-transparent"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAddBannerModal(false)}
+                  className="px-3 py-2 text-xs font-bold text-slate-500"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 rounded-xl bg-[#FF6B00] hover:bg-[#E05E00] text-white text-xs font-bold shadow-xs cursor-pointer active:scale-95"
+                >
+                  حفظ البانر
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Add Manual Order */}
+      {showAddManualOrderModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-black/60 backdrop-blur-xs animate-fadeIn">
+          <div className="w-full max-w-sm bg-white dark:bg-[#1E293B] rounded-3xl p-5 border border-slate-200 dark:border-slate-700 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-200 dark:border-slate-700">
+              <h3 className="text-sm font-black">+ تسجيل طلب يدوي (هاتف / واتساب)</h3>
+              <button onClick={() => setShowAddManualOrderModal(false)} className="p-1 rounded-full text-slate-400">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveManualOrder} className="space-y-3">
+              <div className="space-y-1">
+                <label className="text-xs font-bold block">اسم الحريف *</label>
+                <input
+                  type="text"
+                  required
+                  value={manualCustName}
+                  onChange={e => setManualCustName(e.target.value)}
+                  placeholder="مثال: منير الطرابلسي..."
+                  className="w-full text-xs p-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-transparent"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-bold block">رقم الهاتف *</label>
+                <input
+                  type="text"
+                  required
+                  value={manualCustPhone}
+                  onChange={e => setManualCustPhone(e.target.value)}
+                  placeholder="+216 98 000 000"
+                  className="w-full text-xs p-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-transparent font-mono"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1">
+                  <label className="text-xs font-bold block">الولاية *</label>
+                  <select
+                    value={manualGov}
+                    onChange={e => setManualGov(e.target.value)}
+                    className="w-full text-xs p-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-transparent font-bold"
+                  >
+                    {TUNISIAN_GOVERNORATES.map(g => (
+                      <option key={g.id} value={g.id} className="text-[#0F172A]">{g.nameAr}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-bold block">المبلغ الإجمالي (د.ت) *</label>
+                  <input
+                    type="number"
+                    step="0.001"
+                    required
+                    value={manualAmount}
+                    onChange={e => setManualAmount(e.target.value)}
+                    placeholder="120.000"
+                    className="w-full text-xs p-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-transparent font-mono"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-bold block">ملاحظات الطلبية</label>
+                <input
+                  type="text"
+                  value={manualNotes}
+                  onChange={e => setManualNotes(e.target.value)}
+                  placeholder="طلب عبر اتصال واتساب..."
+                  className="w-full text-xs p-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-transparent"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAddManualOrderModal(false)}
+                  className="px-3 py-2 text-xs font-bold text-slate-500"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-xs cursor-pointer active:scale-95"
+                >
+                  تسجيل واحتساب الطلب
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Confirmation Delete Dialog */}
+      {deleteConfirmModal.isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs animate-fadeIn">
+          <div className="w-full max-w-sm bg-white dark:bg-[#1E293B] rounded-3xl p-5 border border-red-500/30 shadow-2xl space-y-4">
+            <div className="flex items-center gap-2.5 text-red-600">
+              <AlertTriangle className="w-5 h-5 shrink-0" />
+              <h3 className="text-sm font-black">تأكيد الحذف النهائي</h3>
+            </div>
+
+            <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+              هل أنت متأكد من رغبتك في حذف <strong className="text-red-600">{deleteConfirmModal.title}</strong>؟ لا يمكن التراجع عن هذه العملية بعد التأكيد.
+            </p>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-200 dark:border-slate-700">
+              <button
+                type="button"
+                onClick={() => setDeleteConfirmModal({ isOpen: false, type: 'product', id: '', title: '' })}
+                className="px-4 py-2 rounded-xl text-xs font-bold text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
+              >
+                إلغاء
+              </button>
+              <button
+                type="button"
+                onClick={executeDelete}
+                className="px-4 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-bold shadow-xs cursor-pointer active:scale-95"
+              >
+                تأكيد الحذف
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
     </div>
   );
 };
+
+export default OwnerDashboard;

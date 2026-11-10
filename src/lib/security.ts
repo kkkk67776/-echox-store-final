@@ -8,9 +8,44 @@ import {
 } from 'firebase/auth';
 import { doc, getDoc, setDoc, deleteDoc } from 'firebase/firestore';
 
-export const OWNER_EMAIL = 'abdelkaderbahri570@gmail.com';
+export const DEFAULT_OWNER_EMAIL = 'abdelkaderbahri570@gmail.com';
+export const DEFAULT_OWNER_PHONE = '+21621511162';
+
+export function getAuthorizedOwnerEmail(): string {
+  try {
+    const saved = localStorage.getItem('echox_owner_login_email');
+    if (saved && saved.trim()) return saved.trim();
+  } catch {}
+  return DEFAULT_OWNER_EMAIL;
+}
+
+export function setAuthorizedOwnerEmail(email: string) {
+  try {
+    localStorage.setItem('echox_owner_login_email', email.trim().toLowerCase());
+  } catch (e) {
+    console.warn('Storage email write error:', e);
+  }
+}
+
+export function getAuthorizedOwnerPhone(): string {
+  try {
+    const saved = localStorage.getItem('echox_owner_phone');
+    if (saved && saved.trim()) return saved.trim();
+  } catch {}
+  return DEFAULT_OWNER_PHONE;
+}
+
+export function setAuthorizedOwnerPhone(phone: string) {
+  try {
+    localStorage.setItem('echox_owner_phone', phone.trim());
+  } catch (e) {
+    console.warn('Storage phone write error:', e);
+  }
+}
+
+export const OWNER_EMAIL = DEFAULT_OWNER_EMAIL;
 export const OWNER_PHONE_MASKED = '+216 *** *** 62';
-export const OWNER_PHONE_FULL = '+21621511162';
+export const OWNER_PHONE_FULL = DEFAULT_OWNER_PHONE;
 
 export interface OwnerAuthState {
   currentUser: { email: string; uid: string } | null;

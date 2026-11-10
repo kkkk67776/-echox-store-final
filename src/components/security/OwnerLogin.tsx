@@ -6,7 +6,7 @@ import {
   CheckCircle2, 
   ArrowLeft 
 } from 'lucide-react';
-import { OWNER_EMAIL, setOwnerGoogleUser, clearOwnerSecuritySession } from '../../lib/security';
+import { getAuthorizedOwnerEmail, setOwnerGoogleUser, clearOwnerSecuritySession } from '../../lib/security';
 
 interface OwnerLoginProps {
   onNavigate: (route: string, state?: any) => void;
@@ -17,6 +17,8 @@ export const OwnerLogin: React.FC<OwnerLoginProps> = ({ onNavigate }) => {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
+  const authorizedEmail = getAuthorizedOwnerEmail().toLowerCase();
+
   const handleGoogleSignIn = (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
@@ -25,9 +27,9 @@ export const OwnerLogin: React.FC<OwnerLoginProps> = ({ onNavigate }) => {
     const cleanEmail = emailInput.trim().toLowerCase();
 
     // 1. Check if authorized Google Account
-    if (cleanEmail !== OWNER_EMAIL) {
+    if (cleanEmail !== authorizedEmail) {
       clearOwnerSecuritySession();
-      setError(`تم رفض الوصول! الحساب (${emailInput}) غير مصرح له بامتلاك النظام. المنصة مقفلة حصراً للمالك abdelkaderbahri570@gmail.com`);
+      setError(`تم رفض الوصول! الحساب (${emailInput}) غير مصرح له بامتلاك النظام. المنصة مقفلة حصراً للمالك (${authorizedEmail})`);
       setLoading(false);
       return;
     }
@@ -35,13 +37,7 @@ export const OwnerLogin: React.FC<OwnerLoginProps> = ({ onNavigate }) => {
     // 2. Authorized Google Account accepted for Stage 1
     // Store Google session (Note: DOES NOT have Custom Claim owner: true yet!)
     setOwnerGoogleUser({
-      email: OWNER_EMAIL,
-      uid: 'sovereign_owner_uid_570'
-    });
-
-    // 2. Authorized Google Account accepted
-    setOwnerGoogleUser({
-      email: OWNER_EMAIL,
+      email: authorizedEmail,
       uid: 'sovereign_owner_uid_570'
     });
 
@@ -128,10 +124,10 @@ export const OwnerLogin: React.FC<OwnerLoginProps> = ({ onNavigate }) => {
         <div className="text-center pt-2 border-t border-zinc-800">
           <button
             type="button"
-            onClick={() => setEmailInput(OWNER_EMAIL)}
+            onClick={() => setEmailInput(authorizedEmail)}
             className="text-xs text-amber-400/90 hover:text-amber-300 hover:underline font-semibold cursor-pointer"
           >
-            (انقر هنا لتعبئة حساب المالك المعتمد: abdelkaderbahri570@gmail.com)
+            (انقر هنا لتعبئة حساب المالك المعتمد: {authorizedEmail})
           </button>
         </div>
 
