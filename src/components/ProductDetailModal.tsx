@@ -204,7 +204,9 @@ export const ProductDetailModal: React.FC = () => {
                   )}
                 </div>
                 <p className="text-xs text-emerald-700 dark:text-emerald-400 font-bold">
-                  {product.stock > 0 ? `✓ متوفر بالمخزون (${product.stock} قطع متاحة للتسليم الفوري)` : '✕ غير متوفر حالياً'}
+                  {product.stock > 0 
+                    ? `✓ ${t.product.inStock} (${product.stock} ${t.product.inStockCount || 'قطع متاحة للتسليم الفوري'})` 
+                    : `✕ ${t.product.outOfStock}`}
                 </p>
               </div>
 
@@ -302,7 +304,7 @@ export const ProductDetailModal: React.FC = () => {
             {/* Existing Reviews List */}
             <div className="space-y-3">
               {product.reviews.length === 0 ? (
-                <p className="text-sm text-slate-500 py-3">لا توجد تقييمات لهذا المنتج بعد. كن أول من يكتب تقييماً!</p>
+                <p className="text-sm text-slate-500 py-3">{t.product.noReviewsYet}</p>
               ) : (
                 product.reviews.map(rev => (
                   <div key={rev.id} className="p-4 rounded-xl bg-[#FAF8F5] border border-slate-200 space-y-2">
@@ -311,7 +313,7 @@ export const ProductDetailModal: React.FC = () => {
                         <span className="font-bold text-sm text-slate-900">{rev.authorName}</span>
                         {rev.verifiedPurchase && (
                           <span className="text-[11px] bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full font-medium">
-                            شراء مؤكد ✓
+                            {t.product.verifiedPurchase}
                           </span>
                         )}
                       </div>
@@ -336,7 +338,7 @@ export const ProductDetailModal: React.FC = () => {
               <h3 className="text-sm font-bold text-slate-900">{t.product.addReviewTitle}</h3>
               {showReviewSuccess && (
                 <div className="p-3 bg-emerald-50 text-emerald-800 rounded-xl text-xs font-bold">
-                  تم نشر تقييمك بنجاح! شكراً لمشاركتك رأيك مع حرفاء ECHOX.
+                  {t.product.reviewSubmitted}
                 </div>
               )}
               <form onSubmit={handleReviewSubmit} className="space-y-3">
@@ -348,7 +350,7 @@ export const ProductDetailModal: React.FC = () => {
                       required 
                       value={reviewAuthor} 
                       onChange={e => setReviewAuthor(e.target.value)} 
-                      placeholder="مثال: منير الطرابلسي" 
+                      placeholder={t.product.namePlaceholder} 
                       className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 focus:outline-hidden focus:border-[#FF6B00]" 
                     />
                   </div>
@@ -359,11 +361,11 @@ export const ProductDetailModal: React.FC = () => {
                       onChange={e => setReviewRating(Number(e.target.value))}
                       className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 focus:outline-hidden focus:border-[#FF6B00] bg-white"
                     >
-                      <option value="5">⭐⭐⭐⭐⭐ ممتاز (5/5)</option>
-                      <option value="4">⭐⭐⭐⭐ جيد جداً (4/5)</option>
-                      <option value="3">⭐⭐⭐ متوسط (3/5)</option>
-                      <option value="2">⭐⭐ مقبول (2/5)</option>
-                      <option value="1">⭐ ضعيف (1/5)</option>
+                      <option value="5">{t.product.rating5}</option>
+                      <option value="4">{t.product.rating4}</option>
+                      <option value="3">{t.product.rating3}</option>
+                      <option value="2">{t.product.rating2}</option>
+                      <option value="1">{t.product.rating1}</option>
                     </select>
                   </div>
                 </div>
@@ -374,7 +376,7 @@ export const ProductDetailModal: React.FC = () => {
                     rows={2} 
                     value={reviewComment} 
                     onChange={e => setReviewComment(e.target.value)} 
-                    placeholder="اكتب انطباعك عن الجودة وسرعة التوصيل..." 
+                    placeholder={t.product.commentPlaceholder} 
                     className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 focus:outline-hidden focus:border-[#FF6B00]" 
                   />
                 </div>

@@ -127,7 +127,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
           {isAddedRecently ? (
             <>
               <Check className="w-3.5 h-3.5" />
-              <span>تمت الإضافة ✓</span>
+              <span>{t.product.addedToCart || 'تمت الإضافة ✓'}</span>
             </>
           ) : (
             <>

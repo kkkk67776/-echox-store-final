@@ -31,6 +31,8 @@ import {
   getAuthorizedOwnerPhone, 
   setAuthorizedOwnerPhone 
 } from '../lib/security';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { db } from '../lib/firebase';
 
 
 interface StoreContextType {
@@ -425,6 +427,30 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   });
 
+  // Sync site settings from Firestore on mount
+  useEffect(() => {
+    let active = true;
+    async function loadCloudSiteSettings() {
+      try {
+        const snap = await getDoc(doc(db, 'store_settings', 'site'));
+        if (snap.exists() && active) {
+          const cloudData = snap.data() as Partial<SiteSettings>;
+          setSiteSettingsState(prev => {
+            const merged = { ...prev, ...cloudData };
+            try {
+              localStorage.setItem('echox_site_settings', JSON.stringify(merged));
+            } catch {}
+            return merged;
+          });
+        }
+      } catch (err) {
+        console.info('Cloud site settings load notice:', err);
+      }
+    }
+    loadCloudSiteSettings();
+    return () => { active = false; };
+  }, []);
+
   const updateSiteSettings = (updates: Partial<SiteSettings>) => {
     setSiteSettingsState(prev => {
       const next = { ...prev, ...updates };
@@ -435,6 +461,15 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       }
       return next;
     });
+
+    // Background sync to Firestore doc store_settings/site
+    try {
+      setDoc(doc(db, 'store_settings', 'site'), updates, { merge: true }).catch(err => {
+        console.info('Firestore settings sync notice:', err);
+      });
+    } catch (e) {
+      console.info('Firestore save exception notice:', e);
+    }
   };
 
   const updateOwnerSettings = (updates: Partial<OwnerSettings>) => {

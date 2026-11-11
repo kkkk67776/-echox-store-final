@@ -315,6 +315,11 @@ export const INITIAL_SITE_SETTINGS: SiteSettings = {
   },
   officialEmail: 'contact@echox-store.tn',
   address: 'المركب التكنولوجي بالغزالة، أريانة / تونس العاصمة',
+  addressMultilingual: {
+    ar: 'المركب التكنولوجي بالغزالة، أريانة / تونس العاصمة',
+    fr: 'Pôle Technologique El Ghazala, Ariana / Grand Tunis',
+    en: 'El Ghazala Technopark, Ariana / Greater Tunis'
+  },
   governorate: 'ariana',
   supportPhone: '+216 21 511 162',
   whatsappPhone: '21621511162',

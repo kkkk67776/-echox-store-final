@@ -35,9 +35,16 @@ import {
   RefreshCw,
   FileText,
   Percent,
-  Check
+  Check,
+  Globe,
+  ExternalLink,
+  MessageCircle,
+  RotateCcw
 } from 'lucide-react';
-import { Product, Company, Order, OrderStatus, CategoryItem, PromoBanner } from '../types';
+import { doc, setDoc } from 'firebase/firestore';
+import { db } from '../lib/firebase';
+import { Product, Company, Order, OrderStatus, CategoryItem, PromoBanner, SiteSettings } from '../types';
+import { INITIAL_SITE_SETTINGS } from '../data/initialData';
 import { TUNISIAN_GOVERNORATES, getGovernorateName } from '../data/governorates';
 import { 
   getAuthorizedOwnerEmail, 
@@ -60,6 +67,7 @@ interface OwnerDashboardProps {
 type DashboardTab = 
   | 'overview'
   | 'account_security'
+  | 'footer_info'
   | 'products'
   | 'categories'
   | 'partners'
@@ -123,6 +131,24 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
   const [emailSavedSuccess, setEmailSavedSuccess] = useState(false);
   const [phoneSavedSuccess, setPhoneSavedSuccess] = useState(false);
 
+  // 1.1 Footer & Store Info Form States
+  const [footerDescAr, setFooterDescAr] = useState(siteSettings.description?.ar || '');
+  const [footerDescFr, setFooterDescFr] = useState(siteSettings.description?.fr || '');
+  const [footerDescEn, setFooterDescEn] = useState(siteSettings.description?.en || '');
+  const [footerSupportPhone, setFooterSupportPhone] = useState(siteSettings.supportPhone || '+216 21 511 162');
+  const [footerWhatsappPhone, setFooterWhatsappPhone] = useState(siteSettings.whatsappPhone || '21621511162');
+  const [footerEmail, setFooterEmail] = useState(siteSettings.officialEmail || 'contact@echox-store.tn');
+  const [footerAddressAr, setFooterAddressAr] = useState(siteSettings.addressMultilingual?.ar || siteSettings.address || '');
+  const [footerAddressFr, setFooterAddressFr] = useState(siteSettings.addressMultilingual?.fr || '');
+  const [footerAddressEn, setFooterAddressEn] = useState(siteSettings.addressMultilingual?.en || '');
+  const [footerGov, setFooterGov] = useState(siteSettings.governorate || 'ariana');
+  const [footerWorkingHoursAr, setFooterWorkingHoursAr] = useState(siteSettings.workingHours?.ar || '');
+  const [footerWorkingHoursFr, setFooterWorkingHoursFr] = useState(siteSettings.workingHours?.fr || '');
+  const [footerWorkingHoursEn, setFooterWorkingHoursEn] = useState(siteSettings.workingHours?.en || '');
+  const [footerSavedSuccess, setFooterSavedSuccess] = useState(false);
+  const [footerSaving, setFooterSaving] = useState(false);
+  const [previewFooterLang, setPreviewFooterLang] = useState<'ar' | 'fr' | 'en'>('ar');
+
   // Security Lock Change State
   const [lockType, setLockType] = useState<'pin' | 'pattern'>('pin');
   const [currentSecretInput, setCurrentSecretInput] = useState('');
@@ -185,22 +211,19 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
   const [manualAmount, setManualAmount] = useState('');
   const [manualNotes, setManualNotes] = useState('');
 
-  // Authorization Check
+  // Authorization Check: exclusively protected by ECHOX VAULT
   useEffect(() => {
     let cancelled = false;
 
     async function guard() {
-      const googleUser = getOwnerGoogleUser();
-      const authorizedEmail = getAuthorizedOwnerEmail().toLowerCase();
-      
-      if (!googleUser || googleUser.email.toLowerCase() !== authorizedEmail) {
-        clearOwnerSecuritySession();
-        if (!cancelled) navigate('/owner/login');
-        return;
-      }
-
       if (!isOwnerUnlocked()) {
-        if (!cancelled) navigate('/owner/lock');
+        clearOwnerSecuritySession();
+        if (!cancelled) {
+          navigate('/');
+          setTimeout(() => {
+            window.dispatchEvent(new CustomEvent('open_echox_vault'));
+          }, 100);
+        }
         return;
       }
 
@@ -214,12 +237,29 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
     return () => { cancelled = true; };
   }, []);
 
+  // Sync Footer form states whenever siteSettings updates
+  useEffect(() => {
+    setFooterDescAr(siteSettings.description?.ar || '');
+    setFooterDescFr(siteSettings.description?.fr || '');
+    setFooterDescEn(siteSettings.description?.en || '');
+    setFooterSupportPhone(siteSettings.supportPhone || '');
+    setFooterWhatsappPhone(siteSettings.whatsappPhone || '');
+    setFooterEmail(siteSettings.officialEmail || '');
+    setFooterAddressAr(siteSettings.addressMultilingual?.ar || siteSettings.address || '');
+    setFooterAddressFr(siteSettings.addressMultilingual?.fr || '');
+    setFooterAddressEn(siteSettings.addressMultilingual?.en || '');
+    setFooterGov(siteSettings.governorate || 'ariana');
+    setFooterWorkingHoursAr(siteSettings.workingHours?.ar || '');
+    setFooterWorkingHoursFr(siteSettings.workingHours?.fr || '');
+    setFooterWorkingHoursEn(siteSettings.workingHours?.en || '');
+  }, [siteSettings]);
+
   if (checking) {
     return (
       <div className="min-h-[85vh] flex items-center justify-center bg-[#0B0F17] text-white">
         <div className="flex flex-col items-center gap-3">
           <div className="w-10 h-10 border-3 border-[#FF6B00] border-t-transparent rounded-full animate-spin" />
-          <span className="text-xs font-bold text-slate-300">جارٍ التحقق من الصلاحيات والبيئة المشفرة...</span>
+          <span className="text-xs font-bold text-slate-300">جارٍ التحقق من صلاحيات خزنة المالك (ECHOX VAULT)...</span>
         </div>
       </div>
     );
@@ -228,8 +268,9 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
   if (!authorized) return null;
 
   const handleLogout = async () => {
+    clearOwnerSecuritySession();
     await logoutOwnerServer();
-    navigate('/owner/login');
+    navigate('/');
   };
 
   // Calculations for KPI Cards
@@ -256,6 +297,50 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
     updateSiteSettings({ supportPhone: editOwnerPhone.trim(), whatsappPhone: editOwnerPhone.trim().replace(/\D/g, '') });
     setPhoneSavedSuccess(true);
     setTimeout(() => setPhoneSavedSuccess(false), 3000);
+  };
+
+  // Handler for Footer & Store Info Form Save
+  const handleSaveFooterSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setFooterSaving(true);
+
+    const cleanWhatsapp = footerWhatsappPhone.replace(/\D/g, '');
+
+    const updated: Partial<SiteSettings> = {
+      description: {
+        ar: footerDescAr.trim() || siteSettings.description.ar,
+        fr: footerDescFr.trim() || siteSettings.description.fr || footerDescAr.trim(),
+        en: footerDescEn.trim() || siteSettings.description.en || footerDescAr.trim()
+      },
+      supportPhone: footerSupportPhone.trim() || siteSettings.supportPhone,
+      whatsappPhone: cleanWhatsapp || siteSettings.whatsappPhone,
+      officialEmail: footerEmail.trim() || siteSettings.officialEmail,
+      address: footerAddressAr.trim() || siteSettings.address,
+      addressMultilingual: {
+        ar: footerAddressAr.trim() || siteSettings.address,
+        fr: footerAddressFr.trim() || footerAddressAr.trim(),
+        en: footerAddressEn.trim() || footerAddressAr.trim()
+      },
+      governorate: footerGov || siteSettings.governorate,
+      workingHours: {
+        ar: footerWorkingHoursAr.trim() || siteSettings.workingHours.ar,
+        fr: footerWorkingHoursFr.trim() || siteSettings.workingHours.fr,
+        en: footerWorkingHoursEn.trim() || siteSettings.workingHours.en
+      }
+    };
+
+    updateSiteSettings(updated);
+
+    // Sync to Firestore doc store_settings/site
+    try {
+      await setDoc(doc(db, 'store_settings', 'site'), updated, { merge: true });
+    } catch (err) {
+      console.info('Firestore store_settings/site save notice:', err);
+    }
+
+    setFooterSaving(false);
+    setFooterSavedSuccess(true);
+    setTimeout(() => setFooterSavedSuccess(false), 4000);
   };
 
   const handleChangeSecretCode = async (e: React.FormEvent) => {
@@ -296,8 +381,10 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
       }
       setIsChangingPasscode(true);
       try {
-        await saveOwnerLockConfig(lockType, newSecretInput.trim(), false);
-        setSecretSuccessMessage('تم تغيير رمز الدخول السري وتشفيره بنجاح ✓');
+        const { hash } = await saveOwnerLockConfig('pin', newSecretInput.trim(), false);
+        localStorage.setItem('echox_pin_hash', hash);
+        localStorage.removeItem('echox_salt');
+        setSecretSuccessMessage('تم تغيير رمز الـ PIN لخزنة ECHOX وتشفيره بنجاح ✓');
         setCurrentSecretInput('');
         setNewSecretInput('');
         setConfirmSecretInput('');
@@ -667,6 +754,19 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
 
         <button
           type="button"
+          onClick={() => setActiveTab('footer_info')}
+          className={`px-4 py-2 rounded-full text-xs font-bold shrink-0 transition-all cursor-pointer flex items-center gap-1.5 active:scale-95 ${
+            activeTab === 'footer_info'
+              ? 'bg-[#FF6B00] text-white shadow-xs'
+              : 'bg-[#F8FAFC] dark:bg-[#1E293B] text-slate-700 dark:text-slate-200 border border-[#E2E8F0] dark:border-slate-800 hover:border-slate-400'
+          }`}
+        >
+          <FileText className="w-3.5 h-3.5" />
+          <span>تذييل وتفاصيل المتجر</span>
+        </button>
+
+        <button
+          type="button"
           onClick={() => setActiveTab('products')}
           className={`px-4 py-2 rounded-full text-xs font-bold shrink-0 transition-all cursor-pointer flex items-center gap-1.5 active:scale-95 ${
             activeTab === 'products'
@@ -797,6 +897,16 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
 
               <button
                 type="button"
+                onClick={() => setActiveTab('footer_info')}
+                className="p-3 bg-white dark:bg-[#0F172A] rounded-2xl border border-[#E2E8F0] dark:border-slate-700 hover:border-[#FF6B00] text-start transition-all cursor-pointer"
+              >
+                <FileText className="w-5 h-5 text-blue-500 mb-1.5" />
+                <span className="text-xs font-bold block">تذييل وتفاصيل المتجر</span>
+                <span className="text-[10px] text-slate-400">الوصف، الهاتف، العنوان</span>
+              </button>
+
+              <button
+                type="button"
                 onClick={() => setActiveTab('account_security')}
                 className="p-3 bg-white dark:bg-[#0F172A] rounded-2xl border border-[#E2E8F0] dark:border-slate-700 hover:border-[#FF6B00] text-start transition-all cursor-pointer"
               >
@@ -907,26 +1017,15 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
 
             <form onSubmit={handleChangeSecretCode} className="space-y-4">
               
-              {/* Type Selection */}
+              {/* PIN Code Badge */}
               <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setLockType('pin')}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-bold cursor-pointer transition-colors ${
-                    lockType === 'pin' ? 'bg-[#FF6B00] text-white' : 'bg-white dark:bg-[#0F172A] border border-slate-300 dark:border-slate-700'
-                  }`}
-                >
-                  رمز رقمي (PIN Code)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setLockType('pattern')}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-bold cursor-pointer transition-colors ${
-                    lockType === 'pattern' ? 'bg-[#FF6B00] text-white' : 'bg-white dark:bg-[#0F172A] border border-slate-300 dark:border-slate-700'
-                  }`}
-                >
-                  نمط الأمان (Pattern)
-                </button>
+                <span className="px-3 py-1.5 rounded-xl text-xs font-bold bg-[#FF6B00] text-white flex items-center gap-1.5">
+                  <Lock className="w-3.5 h-3.5" />
+                  <span>رمز PIN السري (ECHOX VAULT)</span>
+                </span>
+                <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                  يُطلب تلقائياً عند كتابة الشفرة في شريط البحث
+                </span>
               </div>
 
               {secretChangeStep === 1 ? (
@@ -1014,6 +1113,537 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
             </form>
           </div>
 
+        </div>
+      )}
+
+      {/* Tab: Footer & Store Info Settings (إعدادات تذييل الصفحة وتفاصيل المتجر) */}
+      {activeTab === 'footer_info' && (
+        <div className="space-y-6">
+          {/* Header Card */}
+          <div className="bg-[#F8FAFC] dark:bg-[#1E293B] rounded-3xl p-5 sm:p-6 border border-[#E2E8F0] dark:border-slate-800 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="w-11 h-11 rounded-2xl bg-[#FF6B00]/10 border border-[#FF6B00]/30 flex items-center justify-center text-[#FF6B00]">
+                <FileText className="w-6 h-6" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h2 className="text-base sm:text-lg font-black text-[#0F172A] dark:text-white">
+                    إعدادات تذييل الصفحة وتفاصيل المتجر
+                  </h2>
+                  <span className="text-[10px] font-bold bg-[#FF6B00]/15 text-[#FF6B00] px-2 py-0.5 rounded-full border border-[#FF6B00]/25">
+                    Footer & Store Info Settings
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                  تحكم مباشر في النبذة التعريفية، أرقام الهاتف والواتساب، البريد والعنوان مع التحديث الفوري بجميع لغات المتجر.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 w-full md:w-auto justify-end">
+              <button
+                type="button"
+                onClick={() => navigate('/')}
+                className="px-3.5 py-2 rounded-xl bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-[#0F172A] dark:text-white text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer"
+              >
+                <ExternalLink className="w-3.5 h-3.5" />
+                <span>معاينة المتجر الحقيقي</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Success Banner */}
+          {footerSavedSuccess && (
+            <div className="p-4 bg-emerald-500/15 border-2 border-emerald-500/30 rounded-2xl text-xs text-emerald-600 dark:text-emerald-400 font-bold flex items-center gap-2.5 shadow-sm animate-scaleUp">
+              <CheckCircle2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+              <div>
+                <p className="font-black">تم حفظ وتحديث إعدادات تذييل الصفحة بنجاح! ✓</p>
+                <p className="text-[11px] font-normal opacity-90 mt-0.5">
+                  تم التحديث فورياً في ذاكرة التخزين السريع وقاعدة البيانات السحابية (Firestore) بجميع اللغات.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Live Footer Preview Card */}
+          <div className="bg-[#0B0F17] rounded-3xl p-5 sm:p-6 border border-[#FF6B00]/30 text-white space-y-4 shadow-xl">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pb-3 border-b border-white/10">
+              <div className="flex items-center gap-2">
+                <Globe className="w-4 h-4 text-[#FF6B00]" />
+                <h3 className="text-xs font-bold tracking-wide">
+                  معاينة حية لتذييل الصفحة (Live Footer Preview)
+                </h3>
+                <span className="text-[10px] bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded-full font-mono">
+                  Real-time
+                </span>
+              </div>
+
+              {/* Language Switcher for Preview */}
+              <div className="flex items-center gap-1 bg-white/5 p-1 rounded-xl border border-white/10" dir="ltr">
+                <button
+                  type="button"
+                  onClick={() => setPreviewFooterLang('ar')}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    previewFooterLang === 'ar' ? 'bg-[#FF6B00] text-white shadow-xs' : 'text-gray-400 hover:text-white'
+                  }`}
+                >
+                  العربية
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPreviewFooterLang('fr')}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    previewFooterLang === 'fr' ? 'bg-[#FF6B00] text-white shadow-xs' : 'text-gray-400 hover:text-white'
+                  }`}
+                >
+                  Français
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPreviewFooterLang('en')}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    previewFooterLang === 'en' ? 'bg-[#FF6B00] text-white shadow-xs' : 'text-gray-400 hover:text-white'
+                  }`}
+                >
+                  English
+                </button>
+              </div>
+            </div>
+
+            {/* Rendered Live Mockup */}
+            <div className="bg-[#0F172A] rounded-2xl p-4 sm:p-5 border border-slate-800 space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 text-xs">
+                
+                {/* Brand & Dynamic Bio */}
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <img 
+                      src="/assets/aistudio/file_0000000048188243bc0b721218c854fc_ea3ea21d.png" 
+                      alt="Logo" 
+                      className="w-6 h-6 rounded-full border border-[#FF6B00]/40 object-contain"
+                    />
+                    <span className="font-black text-sm text-white">
+                      ECHOX <span className="text-[#FF6B00]">Store</span>
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-300 leading-relaxed italic bg-black/20 p-2 rounded-xl border border-white/5">
+                    "{previewFooterLang === 'ar' 
+                      ? (footerDescAr || 'متجر تونسي متخصص في المعدات الميكانيكية والكهربائية...') 
+                      : previewFooterLang === 'fr' 
+                      ? (footerDescFr || footerDescAr || 'Boutique en ligne tunisienne spécialisée...') 
+                      : (footerDescEn || footerDescAr || 'Tunisian online store specializing in...')}"
+                  </p>
+                </div>
+
+                {/* Quick Links Preview */}
+                <div className="space-y-1.5 opacity-80 hidden sm:block">
+                  <span className="font-bold text-[11px] text-[#FF6B00] block">
+                    {previewFooterLang === 'ar' ? 'روابط سريعة' : previewFooterLang === 'fr' ? 'Liens rapides' : 'Quick Links'}
+                  </span>
+                  <p className="text-[11px] text-slate-400">• {previewFooterLang === 'ar' ? 'المتجر' : previewFooterLang === 'fr' ? 'Boutique' : 'Store'}</p>
+                  <p className="text-[11px] text-slate-400">• {previewFooterLang === 'ar' ? 'الشركات الشريكة' : previewFooterLang === 'fr' ? 'Partenaires' : 'Partners'}</p>
+                  <p className="text-[11px] text-slate-400">• {previewFooterLang === 'ar' ? 'ميثاق الجودة' : previewFooterLang === 'fr' ? 'Engagement' : 'Promise'}</p>
+                </div>
+
+                {/* Direct Contact Live Preview */}
+                <div className="space-y-1.5">
+                  <span className="font-bold text-[11px] text-[#FF6B00] block">
+                    {previewFooterLang === 'ar' ? 'التواصل المباشر' : previewFooterLang === 'fr' ? 'Contact Direct' : 'Direct Contact'}
+                  </span>
+                  <div className="space-y-1 text-[11px] text-slate-300 font-mono">
+                    <p className="flex items-center gap-1.5">
+                      <Phone className="w-3 h-3 text-[#FF6B00] shrink-0" />
+                      <span dir="ltr">{footerSupportPhone || '+216 21 511 162'}</span>
+                    </p>
+                    <p className="flex items-center gap-1.5 text-[#25D366]">
+                      <MessageCircle className="w-3 h-3 shrink-0" />
+                      <span dir="ltr">+{footerWhatsappPhone.replace(/\D/g, '') || '21621511162'}</span>
+                    </p>
+                    <p className="flex items-center gap-1.5 truncate">
+                      <Mail className="w-3 h-3 text-[#FF6B00] shrink-0" />
+                      <span dir="ltr" className="truncate">{footerEmail || 'contact@echox-store.tn'}</span>
+                    </p>
+                  </div>
+                </div>
+
+                {/* Address Live Preview */}
+                <div className="space-y-1.5">
+                  <span className="font-bold text-[11px] text-[#FF6B00] block">
+                    {previewFooterLang === 'ar' ? 'الموقع والعنوان' : previewFooterLang === 'fr' ? 'Localisation' : 'Location'}
+                  </span>
+                  <p className="flex items-start gap-1.5 text-[11px] text-slate-300">
+                    <MapPin className="w-3.5 h-3.5 text-[#FF6B00] shrink-0 mt-0.5" />
+                    <span>
+                      {previewFooterLang === 'ar' 
+                        ? (footerAddressAr || 'المركب التكنولوجي بالغزالة، أريانة') 
+                        : previewFooterLang === 'fr' 
+                        ? (footerAddressFr || footerAddressAr || 'Pôle Technologique El Ghazala') 
+                        : (footerAddressEn || footerAddressAr || 'El Ghazala Technopark')}
+                      {' • '}
+                      <strong className="text-white">
+                        {getGovernorateName(footerGov, previewFooterLang)}
+                      </strong>
+                    </span>
+                  </p>
+                  <p className="text-[10px] text-slate-400">
+                    {previewFooterLang === 'ar' 
+                      ? (footerWorkingHoursAr || 'من الإثنين إلى السبت: 08:30 إلى 18:30') 
+                      : previewFooterLang === 'fr' 
+                      ? (footerWorkingHoursFr || footerWorkingHoursAr) 
+                      : (footerWorkingHoursEn || footerWorkingHoursAr)}
+                  </p>
+                </div>
+
+              </div>
+
+              <div className="pt-3 border-t border-slate-800 text-center text-[10px] text-slate-500">
+                © 2026 ECHOX Store — {previewFooterLang === 'ar' ? 'كافة الحقوق محفوظة. الجمهورية التونسية.' : previewFooterLang === 'fr' ? 'Tous droits réservés. République Tunisienne.' : 'All rights reserved. Republic of Tunisia.'}
+              </div>
+            </div>
+          </div>
+
+          {/* The Main Edit Form */}
+          <form onSubmit={handleSaveFooterSettings} className="space-y-6">
+            
+            {/* Card 1: Store Description (Multilingual) */}
+            <div className="bg-[#F8FAFC] dark:bg-[#1E293B] rounded-3xl p-5 sm:p-6 border border-[#E2E8F0] dark:border-slate-800 space-y-4">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-700">
+                <div className="flex items-center gap-2">
+                  <FileText className="w-4 h-4 text-[#FF6B00]" />
+                  <h3 className="text-sm font-black text-[#0F172A] dark:text-white">
+                    1. وصف المتجر والنبذة التعريفية (Store Bio & Descriptions)
+                  </h3>
+                </div>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300">
+                  تظهر في تذييل الصفحة بجميع اللغات
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                {/* Arabic Bio */}
+                <div className="bg-white dark:bg-[#0F172A] p-4 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-2">
+                  <label className="text-xs font-bold block flex items-center justify-between text-[#0F172A] dark:text-white">
+                    <span>النبذة التعريفية (بالعربية):</span>
+                    <span className="text-[10px] font-mono text-[#FF6B00] font-bold">AR</span>
+                  </label>
+                  <textarea
+                    rows={3}
+                    required
+                    value={footerDescAr}
+                    onChange={e => setFooterDescAr(e.target.value)}
+                    placeholder="متجر إلكتروني تونسي متخصص في توفير المعدات والأجهزة الصناعية وقطع الغيار الأصلية..."
+                    className="w-full text-xs p-3 rounded-xl border border-slate-300 dark:border-slate-600 bg-transparent text-[#0F172A] dark:text-white focus:border-[#FF6B00] outline-none resize-none leading-relaxed"
+                  />
+                  <span className="text-[10px] text-slate-400 block text-end">
+                    {footerDescAr.length} حرفاً
+                  </span>
+                </div>
+
+                {/* French Bio */}
+                <div className="bg-white dark:bg-[#0F172A] p-4 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-2">
+                  <label className="text-xs font-bold block flex items-center justify-between text-[#0F172A] dark:text-white">
+                    <span>النبذة التعريفية (بالفرنسية):</span>
+                    <span className="text-[10px] font-mono text-[#FF6B00] font-bold">FR</span>
+                  </label>
+                  <textarea
+                    rows={3}
+                    value={footerDescFr}
+                    onChange={e => setFooterDescFr(e.target.value)}
+                    placeholder="Boutique en ligne tunisienne spécialisée dans l’outillage, matériel électrique et pièces détachées..."
+                    className="w-full text-xs p-3 rounded-xl border border-slate-300 dark:border-slate-600 bg-transparent text-[#0F172A] dark:text-white focus:border-[#FF6B00] outline-none resize-none leading-relaxed"
+                    dir="ltr"
+                  />
+                  <span className="text-[10px] text-slate-400 block text-end font-mono">
+                    {footerDescFr.length} chars
+                  </span>
+                </div>
+
+                {/* English Bio */}
+                <div className="bg-white dark:bg-[#0F172A] p-4 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-2">
+                  <label className="text-xs font-bold block flex items-center justify-between text-[#0F172A] dark:text-white">
+                    <span>النبذة التعريفية (بالإنجليزية):</span>
+                    <span className="text-[10px] font-mono text-[#FF6B00] font-bold">EN</span>
+                  </label>
+                  <textarea
+                    rows={3}
+                    value={footerDescEn}
+                    onChange={e => setFooterDescEn(e.target.value)}
+                    placeholder="Tunisian online store specializing in professional tools, electrical equipment, and genuine spare parts..."
+                    className="w-full text-xs p-3 rounded-xl border border-slate-300 dark:border-slate-600 bg-transparent text-[#0F172A] dark:text-white focus:border-[#FF6B00] outline-none resize-none leading-relaxed"
+                    dir="ltr"
+                  />
+                  <span className="text-[10px] text-slate-400 block text-end font-mono">
+                    {footerDescEn.length} chars
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Card 2: Contact Numbers & Email */}
+            <div className="bg-[#F8FAFC] dark:bg-[#1E293B] rounded-3xl p-5 sm:p-6 border border-[#E2E8F0] dark:border-slate-800 space-y-4">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-700">
+                <div className="flex items-center gap-2">
+                  <Phone className="w-4 h-4 text-[#FF6B00]" />
+                  <h3 className="text-sm font-black text-[#0F172A] dark:text-white">
+                    2. أرقام الاتصال وقنوات التواصل الرسمية (Official Contact & Support Channels)
+                  </h3>
+                </div>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+                  روابط تفاعلية بالنقر
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                
+                {/* Support Phone */}
+                <div className="bg-white dark:bg-[#0F172A] p-4 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-2">
+                  <label className="text-xs font-bold block text-[#0F172A] dark:text-white">
+                    رقم الهاتف الرسمي للدعم والمبيعات:
+                  </label>
+                  <div className="relative">
+                    <Phone className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+                    <input
+                      type="text"
+                      required
+                      value={footerSupportPhone}
+                      onChange={e => setFooterSupportPhone(e.target.value)}
+                      placeholder="+216 21 511 162"
+                      className="w-full text-xs py-2.5 pl-9 pr-3 rounded-xl border border-slate-300 dark:border-slate-600 bg-transparent text-[#0F172A] dark:text-white font-mono focus:border-[#FF6B00] outline-none"
+                      dir="ltr"
+                    />
+                  </div>
+                  <span className="text-[10px] text-slate-400 block">
+                    يُفعّل زر الاتصال المباشر tel:{footerSupportPhone}
+                  </span>
+                </div>
+
+                {/* WhatsApp Phone */}
+                <div className="bg-white dark:bg-[#0F172A] p-4 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-2">
+                  <label className="text-xs font-bold block text-[#0F172A] dark:text-white">
+                    رقم الواتساب الرسمي (أرقام فقط):
+                  </label>
+                  <div className="relative">
+                    <MessageCircle className="w-4 h-4 text-[#25D366] absolute left-3 top-3" />
+                    <input
+                      type="text"
+                      required
+                      value={footerWhatsappPhone}
+                      onChange={e => setFooterWhatsappPhone(e.target.value)}
+                      placeholder="21621511162"
+                      className="w-full text-xs py-2.5 pl-9 pr-3 rounded-xl border border-slate-300 dark:border-slate-600 bg-transparent text-[#0F172A] dark:text-white font-mono focus:border-[#FF6B00] outline-none"
+                      dir="ltr"
+                    />
+                  </div>
+                  <span className="text-[10px] text-[#25D366] font-bold block">
+                    رابط المحادثة المباشر: wa.me/{footerWhatsappPhone.replace(/\D/g, '')}
+                  </span>
+                </div>
+
+                {/* Support Email */}
+                <div className="bg-white dark:bg-[#0F172A] p-4 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-2">
+                  <label className="text-xs font-bold block text-[#0F172A] dark:text-white">
+                    بريد الدعم الفني والمراسلات:
+                  </label>
+                  <div className="relative">
+                    <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+                    <input
+                      type="email"
+                      required
+                      value={footerEmail}
+                      onChange={e => setFooterEmail(e.target.value)}
+                      placeholder="contact@echox-store.tn"
+                      className="w-full text-xs py-2.5 pl-9 pr-3 rounded-xl border border-slate-300 dark:border-slate-600 bg-transparent text-[#0F172A] dark:text-white font-mono focus:border-[#FF6B00] outline-none"
+                      dir="ltr"
+                    />
+                  </div>
+                  <span className="text-[10px] text-slate-400 block">
+                    يُفعّل إرسال البريد المباشر mailto:{footerEmail}
+                  </span>
+                </div>
+
+              </div>
+            </div>
+
+            {/* Card 3: Physical Address & Location */}
+            <div className="bg-[#F8FAFC] dark:bg-[#1E293B] rounded-3xl p-5 sm:p-6 border border-[#E2E8F0] dark:border-slate-800 space-y-4">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-700">
+                <div className="flex items-center gap-2">
+                  <MapPin className="w-4 h-4 text-[#FF6B00]" />
+                  <h3 className="text-sm font-black text-[#0F172A] dark:text-white">
+                    3. العنوان المكتوب والموقع الجغرافي (Store Physical Address & Location)
+                  </h3>
+                </div>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400">
+                  متوافق مع محركات البحث SEO
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                
+                {/* Arabic Address */}
+                <div className="bg-white dark:bg-[#0F172A] p-4 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-2">
+                  <label className="text-xs font-bold block text-[#0F172A] dark:text-white">
+                    العنوان المكتوب (بالعربية):
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={footerAddressAr}
+                    onChange={e => setFooterAddressAr(e.target.value)}
+                    placeholder="المركب التكنولوجي بالغزالة، أريانة / تونس"
+                    className="w-full text-xs py-2.5 px-3 rounded-xl border border-slate-300 dark:border-slate-600 bg-transparent text-[#0F172A] dark:text-white focus:border-[#FF6B00] outline-none"
+                  />
+                  <span className="text-[10px] text-slate-400 block">يظهر في واجهة المتجر العربية</span>
+                </div>
+
+                {/* French Address */}
+                <div className="bg-white dark:bg-[#0F172A] p-4 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-2">
+                  <label className="text-xs font-bold block text-[#0F172A] dark:text-white">
+                    العنوان بالفرنسية (FR):
+                  </label>
+                  <input
+                    type="text"
+                    value={footerAddressFr}
+                    onChange={e => setFooterAddressFr(e.target.value)}
+                    placeholder="Pôle Technologique El Ghazala, Ariana"
+                    className="w-full text-xs py-2.5 px-3 rounded-xl border border-slate-300 dark:border-slate-600 bg-transparent text-[#0F172A] dark:text-white focus:border-[#FF6B00] outline-none"
+                    dir="ltr"
+                  />
+                  <span className="text-[10px] text-slate-400 block">يظهر في النسخة الفرنسية</span>
+                </div>
+
+                {/* English Address */}
+                <div className="bg-white dark:bg-[#0F172A] p-4 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-2">
+                  <label className="text-xs font-bold block text-[#0F172A] dark:text-white">
+                    العنوان بالإنجليزية (EN):
+                  </label>
+                  <input
+                    type="text"
+                    value={footerAddressEn}
+                    onChange={e => setFooterAddressEn(e.target.value)}
+                    placeholder="El Ghazala Technopark, Ariana / Tunis"
+                    className="w-full text-xs py-2.5 px-3 rounded-xl border border-slate-300 dark:border-slate-600 bg-transparent text-[#0F172A] dark:text-white focus:border-[#FF6B00] outline-none"
+                    dir="ltr"
+                  />
+                  <span className="text-[10px] text-slate-400 block">يظهر في النسخة الإنجليزية</span>
+                </div>
+
+                {/* Governorate Select */}
+                <div className="bg-white dark:bg-[#0F172A] p-4 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-2">
+                  <label className="text-xs font-bold block text-[#0F172A] dark:text-white">
+                    ولاية المقر التونسي الرئيسي:
+                  </label>
+                  <select
+                    value={footerGov}
+                    onChange={e => setFooterGov(e.target.value)}
+                    className="w-full text-xs py-2.5 px-3 rounded-xl border border-slate-300 dark:border-slate-600 bg-transparent text-[#0F172A] dark:text-white focus:border-[#FF6B00] outline-none"
+                  >
+                    {TUNISIAN_GOVERNORATES.map(gov => (
+                      <option key={gov.id} value={gov.id} className="dark:bg-[#0F172A] text-slate-900 dark:text-white">
+                        {gov.nameAr} ({gov.nameFr})
+                      </option>
+                    ))}
+                  </select>
+                  <span className="text-[10px] text-slate-400 block">إحدى ولايات تونس الـ 24</span>
+                </div>
+
+              </div>
+            </div>
+
+            {/* Card 4: Working Hours */}
+            <div className="bg-[#F8FAFC] dark:bg-[#1E293B] rounded-3xl p-5 sm:p-6 border border-[#E2E8F0] dark:border-slate-800 space-y-4">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-700">
+                <div className="flex items-center gap-2">
+                  <Clock className="w-4 h-4 text-[#FF6B00]" />
+                  <h3 className="text-sm font-black text-[#0F172A] dark:text-white">
+                    4. أوقات العمل والدعم الفني (Support Working Hours)
+                  </h3>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="bg-white dark:bg-[#0F172A] p-4 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-2">
+                  <label className="text-xs font-bold block text-[#0F172A] dark:text-white">أوقات العمل (بالعربية):</label>
+                  <input
+                    type="text"
+                    value={footerWorkingHoursAr}
+                    onChange={e => setFooterWorkingHoursAr(e.target.value)}
+                    placeholder="من الإثنين إلى السبت: 08:30 إلى 18:30"
+                    className="w-full text-xs py-2.5 px-3 rounded-xl border border-slate-300 dark:border-slate-600 bg-transparent text-[#0F172A] dark:text-white focus:border-[#FF6B00] outline-none"
+                  />
+                </div>
+
+                <div className="bg-white dark:bg-[#0F172A] p-4 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-2">
+                  <label className="text-xs font-bold block text-[#0F172A] dark:text-white">أوقات العمل (بالفرنسية):</label>
+                  <input
+                    type="text"
+                    value={footerWorkingHoursFr}
+                    onChange={e => setFooterWorkingHoursFr(e.target.value)}
+                    placeholder="Du Lundi au Samedi : 08h30 à 18h30"
+                    className="w-full text-xs py-2.5 px-3 rounded-xl border border-slate-300 dark:border-slate-600 bg-transparent text-[#0F172A] dark:text-white focus:border-[#FF6B00] outline-none"
+                    dir="ltr"
+                  />
+                </div>
+
+                <div className="bg-white dark:bg-[#0F172A] p-4 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-2">
+                  <label className="text-xs font-bold block text-[#0F172A] dark:text-white">أوقات العمل (بالإنجليزية):</label>
+                  <input
+                    type="text"
+                    value={footerWorkingHoursEn}
+                    onChange={e => setFooterWorkingHoursEn(e.target.value)}
+                    placeholder="Monday to Saturday: 08:30 to 18:30"
+                    className="w-full text-xs py-2.5 px-3 rounded-xl border border-slate-300 dark:border-slate-600 bg-transparent text-[#0F172A] dark:text-white focus:border-[#FF6B00] outline-none"
+                    dir="ltr"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Bottom Actions Bar */}
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 p-4 bg-[#F8FAFC] dark:bg-[#1E293B] rounded-2xl border border-[#E2E8F0] dark:border-slate-800">
+              <div className="flex items-center gap-2">
+                <button
+                  type="submit"
+                  disabled={footerSaving}
+                  className="px-6 py-3 rounded-xl bg-[#FF6B00] hover:bg-[#E05E00] text-white text-xs font-bold shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 active:scale-95"
+                >
+                  <Save className="w-4 h-4" />
+                  <span>{footerSaving ? 'جارٍ الحفظ والمزامنة...' : 'حفظ التغييرات وتطبيق فوري على التذييل ✓'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFooterDescAr(INITIAL_SITE_SETTINGS.description.ar);
+                    setFooterDescFr(INITIAL_SITE_SETTINGS.description.fr);
+                    setFooterDescEn(INITIAL_SITE_SETTINGS.description.en);
+                    setFooterSupportPhone(INITIAL_SITE_SETTINGS.supportPhone);
+                    setFooterWhatsappPhone(INITIAL_SITE_SETTINGS.whatsappPhone);
+                    setFooterEmail(INITIAL_SITE_SETTINGS.officialEmail);
+                    setFooterAddressAr(INITIAL_SITE_SETTINGS.address);
+                    setFooterAddressFr(INITIAL_SITE_SETTINGS.addressMultilingual?.fr || '');
+                    setFooterAddressEn(INITIAL_SITE_SETTINGS.addressMultilingual?.en || '');
+                    setFooterGov(INITIAL_SITE_SETTINGS.governorate);
+                    setFooterWorkingHoursAr(INITIAL_SITE_SETTINGS.workingHours.ar);
+                    setFooterWorkingHoursFr(INITIAL_SITE_SETTINGS.workingHours.fr);
+                    setFooterWorkingHoursEn(INITIAL_SITE_SETTINGS.workingHours.en);
+                  }}
+                  className="px-4 py-3 rounded-xl bg-white dark:bg-[#0F172A] border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:text-[#0F172A] dark:hover:text-white text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>استعادة القيم الافتراضية</span>
+                </button>
+              </div>
+
+              {footerSavedSuccess && (
+                <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5">
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>تم التحديث الفوري في تذييل المتجر لجميع اللغات!</span>
+                </span>
+              )}
+            </div>
+
+          </form>
         </div>
       )}
 

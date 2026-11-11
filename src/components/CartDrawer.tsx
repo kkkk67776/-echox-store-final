@@ -89,9 +89,9 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({ onOpenCheckout }) => {
             <span className="flex items-center gap-1">
               <Truck className="w-4 h-4 text-[#FF6B00]" />
               {amountLeftForFreeDelivery === 0 ? (
-                <span className="text-emerald-700 dark:text-emerald-400 font-bold">تهانينا! مؤهل للتوصيل المجاني لكافة ولايات تونس ✓</span>
+                <span className="text-emerald-700 dark:text-emerald-400 font-bold">{t.cart.freeShippingEligible}</span>
               ) : (
-                <span>أضف <strong className="text-[#FF6B00] tabular-nums">{amountLeftForFreeDelivery.toFixed(3)} {t.cart.currency}</strong> لتحصل على توصيل مجاني!</span>
+                <span>{t.cart.addForFreeShipping || 'أضف'} <strong className="text-[#FF6B00] tabular-nums">{amountLeftForFreeDelivery.toFixed(3)} {t.cart.currency}</strong> {t.cart.toGetFreeShipping || 'لتحصل على توصيل مجاني!'}</span>
               )}
             </span>
             <span className="text-[11px] text-slate-500 dark:text-slate-400 tabular-nums">{Math.round(progressToFreeDelivery)}%</span>
@@ -180,7 +180,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({ onOpenCheckout }) => {
               <div className="relative flex-1">
                 <input
                   type="text"
-                  placeholder="كود الخصم (جرب ECHOX2026)"
+                  placeholder={t.cart.couponPlaceholder || 'كود الخصم (جرب ECHOX2026)'}
                   value={inputCoupon}
                   onChange={e => setInputCoupon(e.target.value)}
                   className="w-full text-xs py-2 px-3 pl-8 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-[#0F172A] text-slate-900 dark:text-white focus:outline-hidden focus:border-[#FF6B00]"

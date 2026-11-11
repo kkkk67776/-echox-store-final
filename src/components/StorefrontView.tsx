@@ -123,14 +123,14 @@ export const StorefrontView: React.FC = () => {
               <div>
                 <div className="flex items-center gap-1.5 flex-wrap">
                   <span className="text-[10px] font-black uppercase tracking-wider bg-white text-[#FF6B00] px-2.5 py-0.5 rounded-full shadow-2xs">
-                    عروض حصرية
+                    {t.storefront?.defaultBannerTag || 'عروض حصرية'}
                   </span>
                   <span className="text-xs sm:text-sm font-black text-white">
-                    عروض وتخفيضات اليوم على كافة المعدات وقطع الغيار
+                    {t.storefront?.defaultBannerTitle || 'عروض وتخفيضات اليوم على كافة المعدات وقطع الغيار'}
                   </span>
                 </div>
                 <p className="text-[11px] text-white/90 hidden xs:block mt-0.5">
-                  توصيل سريع لكافة الـ24 ولاية والدفع عند المعاينة والاستلام
+                  {t.storefront?.defaultBannerSubtitle || 'توصيل سريع لكافة الـ24 ولاية والدفع عند المعاينة والاستلام'}
                 </p>
               </div>
             </div>
@@ -143,31 +143,32 @@ export const StorefrontView: React.FC = () => {
       {isBrowsingAll && (
         <>
           {/* 2. القسم الأفقي الأول: مقترحة لك (Recommended / For You Carousel) */}
-          <section className="max-w-7xl mx-auto px-2.5 sm:px-4 space-y-3">
+          <section className="max-w-7xl mx-auto px-2.5 sm:px-4 space-y-3 w-full max-w-full overflow-hidden">
             {/* Header مع سهم جانبي للمزيد */}
             <div className="flex items-center justify-between">
               <div>
                 <h2 className="text-base sm:text-lg font-black text-[#0F172A] dark:text-slate-100 leading-tight">
-                  مقترحة لك
+                  {t.storefront?.suggestedForYou || 'مقترحة لك'}
                 </h2>
                 <p className="text-[11px] text-slate-500 dark:text-slate-400 font-medium">
-                  استناداً إلى نشاطك الأخير والأجهزة الأكثر ملائمة لورشتك
+                  {t.storefront?.suggestedDesc || 'استناداً إلى نشاطك الأخير والأجهزة الأكثر ملائمة لورشتك'}
                 </p>
               </div>
 
               <button
                 type="button"
                 onClick={() => setSelectedCategory('power_tools')}
-                className="flex items-center gap-1 text-xs font-bold text-[#FF6B00] hover:text-[#E05E00] p-1 rounded-full hover:bg-[#FF6B00]/10 transition-colors"
-                title="عرض المزيد"
+                className="flex items-center gap-1 text-xs font-bold text-[#FF6B00] hover:text-[#E05E00] p-1 rounded-full hover:bg-[#FF6B00]/10 transition-colors cursor-pointer"
+                title={t.storefront?.more || 'المزيد'}
               >
-                <span className="hidden sm:inline">المزيد</span>
-                <ArrowLeft className="w-4 h-4" />
+                <span className="hidden sm:inline">{t.storefront?.more || 'المزيد'}</span>
+                <ArrowLeft className={`w-4 h-4 ${language !== 'ar' ? 'rotate-180' : ''}`} />
               </button>
             </div>
 
             {/* شريط التمرير الأفقي لبطاقات المنتجات المربعة (Horizontal Carousel) */}
-            <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-none snap-x">
+            <div className="w-full max-w-full overflow-hidden">
+              <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-none snap-x w-full max-w-full">
               {suggestedForYou.map((product) => {
                 const prodName = product.name[language] || product.name.ar;
                 const isAdded = addedItemIds[product.id];
@@ -230,11 +231,12 @@ export const StorefrontView: React.FC = () => {
                   </div>
                 );
               })}
+              </div>
             </div>
           </section>
 
           {/* 3. القائمة الرأسية المدمجة (Google Play Top Charts Ranked List) */}
-          <section className="max-w-7xl mx-auto px-2.5 sm:px-4 space-y-3">
+          <section className="max-w-7xl mx-auto px-2.5 sm:px-4 space-y-3 w-full max-w-full">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <span className="w-7 h-7 rounded-full bg-[#FF6B00]/10 flex items-center justify-center text-[#FF6B00]">
@@ -242,10 +244,10 @@ export const StorefrontView: React.FC = () => {
                 </span>
                 <div>
                   <h2 className="text-base sm:text-lg font-black text-[#0F172A] dark:text-slate-100 leading-tight">
-                    أفضل الترتيبات • الأكثر طلباً
+                    {t.storefront?.topTrending || 'أفضل الترتيبات • الأكثر طلباً'}
                   </h2>
                   <p className="text-[11px] text-slate-500 dark:text-slate-400 font-medium">
-                    القطع والأدوات الأكثر مبيعاً وتقييماً من الحرفيين في تونس
+                    {t.storefront?.topTrendingDesc || 'القطع والأدوات الأكثر مبيعاً وتقييماً من الحرفيين في تونس'}
                   </p>
                 </div>
               </div>
@@ -253,11 +255,11 @@ export const StorefrontView: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setSelectedCategory('all')}
-                className="flex items-center gap-1 text-xs font-bold text-[#FF6B00] hover:text-[#E05E00] p-1 rounded-full hover:bg-[#FF6B00]/10 transition-colors"
-                title="عرض الكل"
+                className="flex items-center gap-1 text-xs font-bold text-[#FF6B00] hover:text-[#E05E00] p-1 rounded-full hover:bg-[#FF6B00]/10 transition-colors cursor-pointer"
+                title={t.storefront?.all || 'الكل'}
               >
-                <span className="hidden sm:inline">الكل</span>
-                <ArrowLeft className="w-4 h-4" />
+                <span className="hidden sm:inline">{t.storefront?.all || 'الكل'}</span>
+                <ArrowLeft className={`w-4 h-4 ${language !== 'ar' ? 'rotate-180' : ''}`} />
               </button>
             </div>
 
@@ -307,7 +309,7 @@ export const StorefrontView: React.FC = () => {
                     {/* السعر وزر الطلب / الإضافة */}
                     <div className="flex items-center gap-2 shrink-0">
                       <span className="text-xs sm:text-sm font-black text-[#FF6B00] font-mono">
-                        {product.price.toFixed(3)} د.ت
+                        {product.price.toFixed(3)} {t.cart.currency}
                       </span>
                       <button
                         type="button"
@@ -318,7 +320,7 @@ export const StorefrontView: React.FC = () => {
                             : 'bg-[#FF6B00] hover:bg-[#E05E00] text-white shadow-xs'
                         }`}
                       >
-                        {isAdded ? 'تم ✓' : 'أضف'}
+                        {isAdded ? (t.storefront?.quickAdded || 'تم ✓') : (t.storefront?.quickAdd || 'أضف')}
                       </button>
                     </div>
                   </div>
@@ -329,28 +331,29 @@ export const StorefrontView: React.FC = () => {
 
           {/* 4. القسم الأفقي الثاني: أدوات ومعدات ورشات (Power Tools Carousel) */}
           {powerToolsOnly.length > 0 && (
-            <section className="max-w-7xl mx-auto px-2.5 sm:px-4 space-y-3">
+            <section className="max-w-7xl mx-auto px-2.5 sm:px-4 space-y-3 w-full max-w-full overflow-hidden">
               <div className="flex items-center justify-between">
                 <div>
                   <h2 className="text-base sm:text-lg font-black text-[#0F172A] dark:text-slate-100 leading-tight">
-                    أدوات ومعدات ميكانيكية وكهربائية
+                    {t.storefront?.powerToolsTitle || 'أدوات ومعدات ميكانيكية وكهربائية'}
                   </h2>
                   <p className="text-[11px] text-slate-500 dark:text-slate-400 font-medium">
-                    مثاقب، مناشير، ومعدات ورشات معتمدة بضمان رسمي
+                    {t.storefront?.powerToolsDesc || 'مثاقب، مناشير، ومعدات ورشات معتمدة بضمان رسمي'}
                   </p>
                 </div>
 
                 <button
                   type="button"
                   onClick={() => setSelectedCategory('power_tools')}
-                  className="flex items-center gap-1 text-xs font-bold text-[#FF6B00] hover:text-[#E05E00] p-1 rounded-full hover:bg-[#FF6B00]/10 transition-colors"
+                  className="flex items-center gap-1 text-xs font-bold text-[#FF6B00] hover:text-[#E05E00] p-1 rounded-full hover:bg-[#FF6B00]/10 transition-colors cursor-pointer"
                 >
-                  <span className="hidden sm:inline">المزيد</span>
-                  <ArrowLeft className="w-4 h-4" />
+                  <span className="hidden sm:inline">{t.storefront?.more || 'المزيد'}</span>
+                  <ArrowLeft className={`w-4 h-4 ${language !== 'ar' ? 'rotate-180' : ''}`} />
                 </button>
               </div>
 
-              <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-none snap-x">
+              <div className="w-full max-w-full overflow-hidden">
+                <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-none snap-x w-full max-w-full">
                 {powerToolsOnly.map((product) => {
                   const prodName = product.name[language] || product.name.ar;
                   const isAdded = addedItemIds[product.id];
@@ -404,6 +407,7 @@ export const StorefrontView: React.FC = () => {
                     </div>
                   );
                 })}
+                </div>
               </div>
             </section>
           )}
@@ -411,12 +415,12 @@ export const StorefrontView: React.FC = () => {
       )}
 
       {/* 5. شريط الفلترة واختيار الولاية التونسية */}
-      <section className="max-w-7xl mx-auto px-2.5 sm:px-4">
+      <section className="max-w-7xl mx-auto px-2.5 sm:px-4 w-full max-w-full">
         <div className="flex items-center justify-between gap-2 bg-[#F8FAFC] dark:bg-[#1E293B] border border-[#E2E8F0] dark:border-slate-800 p-2 sm:p-2.5 rounded-2xl">
           <div className="flex items-center gap-1.5">
             <span className="w-2.5 h-2.5 rounded-full bg-[#FF6B00]"></span>
             <span className="text-xs font-bold text-[#0F172A] dark:text-slate-100">
-              كافة المعروضات ({filteredProducts.length})
+              {t.storefront?.allProducts || 'كافة المعروضات'} ({filteredProducts.length})
             </span>
           </div>
 
@@ -427,10 +431,10 @@ export const StorefrontView: React.FC = () => {
               onChange={e => setSelectedGovFilter(e.target.value)}
               className="text-xs py-1 px-2.5 rounded-full border border-[#E2E8F0] dark:border-slate-700 bg-white dark:bg-[#0F172A] font-bold text-[#0F172A] dark:text-slate-100 focus:outline-none focus:border-[#FF6B00] cursor-pointer shadow-2xs"
             >
-              <option value="all">كافة ولايات تونس (الكل)</option>
+              <option value="all">{t.storefront?.allGovernorates || 'كافة ولايات تونس (الكل)'}</option>
               {TUNISIAN_GOVERNORATES.map(gov => (
                 <option key={gov.id} value={gov.id}>
-                  ولاية {gov.nameAr}
+                  {language === 'fr' ? gov.nameFr : language === 'en' ? gov.nameEn : `${t.storefront?.governoratePrefix || 'ولاية'} ${gov.nameAr}`}
                 </option>
               ))}
             </select>
@@ -439,20 +443,20 @@ export const StorefrontView: React.FC = () => {
       </section>
 
       {/* 6. شبكة المنتجات الكاملة في عمودين متجاورين (2-Column Grid on Mobile) */}
-      <main className="max-w-7xl mx-auto px-2.5 sm:px-4">
+      <main className="max-w-7xl mx-auto px-2.5 sm:px-4 w-full max-w-full">
         {filteredProducts.length === 0 ? (
           <div className="py-12 text-center bg-[#F8FAFC] dark:bg-[#1E293B] rounded-3xl border border-[#E2E8F0] dark:border-slate-800 p-6 space-y-3">
-            <h3 className="text-sm font-bold text-[#0F172A] dark:text-slate-100">لا توجد منتجات مطابقة لبحثك أو الفلتر</h3>
-            <p className="text-xs text-slate-500 dark:text-slate-400">جرب اختيار تصنيف آخر أو تفريغ شريط البحث</p>
+            <h3 className="text-sm font-bold text-[#0F172A] dark:text-slate-100">{t.storefront?.noProductsFound || 'لا توجد منتجات مطابقة لبحثك أو الفلتر'}</h3>
+            <p className="text-xs text-slate-500 dark:text-slate-400">{t.storefront?.noProductsDesc || 'جرب اختيار تصنيف آخر أو تفريغ شريط البحث'}</p>
             <button
               type="button"
               onClick={() => {
                 setSelectedCategory('all');
                 setSelectedGovFilter('all');
               }}
-              className="text-xs font-bold text-[#FF6B00] hover:underline"
+              className="text-xs font-bold text-[#FF6B00] hover:underline cursor-pointer"
             >
-              إعادة ضبط الفلاتر وعرض كافة المنتجات
+              {t.storefront?.resetFilters || 'إعادة ضبط الفلاتر وعرض كافة المنتجات'}
             </button>
           </div>
         ) : (
@@ -465,7 +469,7 @@ export const StorefrontView: React.FC = () => {
       </main>
 
       {/* 7. شريط الثقة والمميزات (Trust Bar) */}
-      <section className="max-w-7xl mx-auto px-2.5 sm:px-4 pt-2">
+      <section className="max-w-7xl mx-auto px-2.5 sm:px-4 pt-2 w-full max-w-full">
         <div className="rounded-3xl bg-[#F8FAFC] dark:bg-[#1E293B] border border-[#E2E8F0] dark:border-slate-800 p-3 sm:p-5">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5 sm:gap-4">
             
@@ -474,8 +478,8 @@ export const StorefrontView: React.FC = () => {
                 <Truck className="w-4 h-4" />
               </div>
               <div className="truncate">
-                <h4 className="text-xs font-bold text-[#0F172A] dark:text-slate-100 leading-tight">توصيل سريع</h4>
-                <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight">لكافة ولايات تونس الـ24</p>
+                <h4 className="text-xs font-bold text-[#0F172A] dark:text-slate-100 leading-tight">{t.storefront?.trustFastDelivery || 'توصيل سريع'}</h4>
+                <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight">{t.storefront?.trustFastDeliveryDesc || 'لكافة ولايات تونس الـ24'}</p>
               </div>
             </div>
 
@@ -484,8 +488,8 @@ export const StorefrontView: React.FC = () => {
                 <Banknote className="w-4 h-4" />
               </div>
               <div className="truncate">
-                <h4 className="text-xs font-bold text-[#0F172A] dark:text-slate-100 leading-tight">دفع عند الاستلام</h4>
-                <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight">عاين طلبيتك قبل الدفع</p>
+                <h4 className="text-xs font-bold text-[#0F172A] dark:text-slate-100 leading-tight">{t.storefront?.trustCod || 'دفع عند الاستلام'}</h4>
+                <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight">{t.storefront?.trustCodDesc || 'عاين طلبيتك قبل الدفع'}</p>
               </div>
             </div>
 
@@ -494,8 +498,8 @@ export const StorefrontView: React.FC = () => {
                 <ShieldCheck className="w-4 h-4" />
               </div>
               <div className="truncate">
-                <h4 className="text-xs font-bold text-[#0F172A] dark:text-slate-100 leading-tight">قطع ومعدات أصلية</h4>
-                <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight">ضمان جودة معتمد 100%</p>
+                <h4 className="text-xs font-bold text-[#0F172A] dark:text-slate-100 leading-tight">{t.storefront?.trustGenuine || 'قطع ومعدات أصلية'}</h4>
+                <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight">{t.storefront?.trustGenuineDesc || 'ضمان جودة معتمد 100%'}</p>
               </div>
             </div>
 
@@ -504,8 +508,8 @@ export const StorefrontView: React.FC = () => {
                 <Headphones className="w-4 h-4" />
               </div>
               <div className="truncate">
-                <h4 className="text-xs font-bold text-[#0F172A] dark:text-slate-100 leading-tight">دعم وتتبع مباشر</h4>
-                <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight">خدمة هاتفية وواتساب</p>
+                <h4 className="text-xs font-bold text-[#0F172A] dark:text-slate-100 leading-tight">{t.storefront?.trustDirectSupport || 'دعم وتتبع مباشر'}</h4>
+                <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight">{t.storefront?.trustDirectSupportDesc || 'خدمة هاتفية وواتساب'}</p>
               </div>
             </div>
 

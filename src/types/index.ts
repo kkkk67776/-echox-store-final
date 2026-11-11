@@ -156,6 +156,7 @@ export interface SiteSettings {
   description: MultilingualText;
   officialEmail: string;
   address: string;
+  addressMultilingual?: MultilingualText;
   governorate: string;
   supportPhone: string;
   whatsappPhone: string; // e.g. 21621511162

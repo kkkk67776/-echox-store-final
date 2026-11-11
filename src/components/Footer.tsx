@@ -30,19 +30,21 @@ export const Footer: React.FC = () => {
               />
               <div>
                 <span className="text-lg font-black tracking-tight text-white block leading-none">
-                  ECHOX <span className="text-[#FF6B00]">Market</span>
+                  ECHOX <span className="text-[#FF6B00]">Store</span>
                 </span>
                 <span className="text-[10px] text-slate-400 font-bold">المنصة التونسية المعتمدة</span>
               </div>
             </div>
 
             <p className="text-xs text-slate-300 leading-relaxed">
-              متجر إلكتروني تونسي متخصص في توفير المعدات والأجهزة الصناعية وقطع الغيار الأصلية مع الدفع عند الاستلام والتوصيل لكافة ولايات تونس الـ24.
+              {(typeof siteSettings.description === 'object' && siteSettings.description
+                ? siteSettings.description[language] || siteSettings.description.ar || siteSettings.description.fr || siteSettings.description.en
+                : (siteSettings.description as any)) || t.footer.desc}
             </p>
 
             <div className="p-2.5 bg-slate-800/80 rounded-xl border border-slate-700 text-xs flex items-center gap-2 text-slate-200">
               <Truck className="w-4 h-4 text-[#FF6B00] shrink-0" />
-              <span className="font-semibold text-[11px]">شحن سريع وتوصيل لجميع الـ 24 ولاية</span>
+              <span className="font-semibold text-[11px]">{t.footer.deliveryAllTunisia || 'شحن سريع وتوصيل لجميع الـ 24 ولاية'}</span>
             </div>
           </div>
 
@@ -154,26 +156,32 @@ export const Footer: React.FC = () => {
                 <li className="flex items-center gap-2">
                   <span className="w-2 h-2 rounded-full bg-[#25D366] animate-pulse"></span>
                   <a 
-                    href={`https://wa.me/${siteSettings.whatsappPhone}?text=مرحباً%20ECHOX%20Market%20تونس`}
+                    href={`https://wa.me/${siteSettings.whatsappPhone.replace(/\D/g, '')}?text=مرحباً%20ECHOX%20Store%20تونس`}
                     target="_blank"
                     rel="noreferrer"
                     className="text-[#25D366] hover:underline flex items-center gap-1 font-bold"
                   >
                     <span>واتساب:</span>
-                    <span dir="ltr">+{siteSettings.whatsappPhone}</span>
+                    <span dir="ltr">+{siteSettings.whatsappPhone.replace(/\D/g, '')}</span>
                   </a>
                 </li>
               )}
               {siteSettings?.officialEmail && (
                 <li className="flex items-center gap-2">
                   <Mail className="w-3.5 h-3.5 text-[#FF6B00]" />
-                  <span dir="ltr" className="text-slate-300 text-[11px] truncate">{siteSettings.officialEmail}</span>
+                  <a href={`mailto:${siteSettings.officialEmail}`} dir="ltr" className="text-slate-300 text-[11px] truncate hover:text-white">
+                    {siteSettings.officialEmail}
+                  </a>
                 </li>
               )}
-              {siteSettings?.address && (
+              {(siteSettings?.address || siteSettings?.addressMultilingual) && (
                 <li className="flex items-start gap-2">
                   <MapPin className="w-3.5 h-3.5 text-[#FF6B00] shrink-0 mt-0.5" />
-                  <span className="text-slate-300 text-[11px]">{siteSettings.address}</span>
+                  <span className="text-slate-300 text-[11px]">
+                    {(siteSettings.addressMultilingual && siteSettings.addressMultilingual[language]) || 
+                     siteSettings.address || 
+                     (siteSettings.addressMultilingual && (siteSettings.addressMultilingual.ar || siteSettings.addressMultilingual.fr || siteSettings.addressMultilingual.en))}
+                  </span>
                 </li>
               )}
             </ul>
@@ -183,7 +191,7 @@ export const Footer: React.FC = () => {
 
         {/* حقوق المتجر بدون أي روابط إدارية */}
         <div className="pt-6 mt-6 border-t border-slate-800 text-center text-xs text-slate-500">
-          <p>© 2026 ECHOX Market — كافة الحقوق محفوظة. الجمهورية التونسية.</p>
+          <p>© 2026 ECHOX Store — {t.footer.rights || 'كافة الحقوق محفوظة. الجمهورية التونسية.'}</p>
         </div>
       </div>
     </footer>

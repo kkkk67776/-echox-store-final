@@ -13,8 +13,6 @@ import { CheckoutModal } from './components/CheckoutModal';
 import { OrderTrackingView } from './components/OrderTrackingView';
 import { CustomerPortal } from './components/CustomerPortal';
 import { OwnerDashboard } from './components/OwnerDashboard';
-import { OwnerLogin } from './components/security/OwnerLogin';
-import { OwnerLockScreen } from './components/security/OwnerLockScreen';
 import OwnerSecurityRoom from './components/security/OwnerSecurityRoom';
 import { PromiseView, CompaniesView, ContactView } from './components/StaticPages';
 import { FloatingActions } from './components/FloatingActions';
@@ -31,13 +29,15 @@ const AppContent: React.FC = () => {
   useEffect(() => {
     const syncRouteFromUrl = () => {
       const path = window.location.pathname;
-      if (
-        path === '/owner/login' || 
-        path === '/owner/lock' || 
-        path === '/owner/security-code' || 
-        path === '/owner/dashboard'
-      ) {
-        setCurrentView(path);
+      if (path === '/owner/dashboard' || path === '/owner_dashboard') {
+        setCurrentView('/owner/dashboard');
+      } else if (path === '/owner/login' || path === '/owner/lock' || path === '/owner/security-code') {
+        // Redundant screens removed: redirect to storefront and open ECHOX VAULT
+        window.history.replaceState({}, '', '/');
+        setCurrentView('store');
+        setTimeout(() => {
+          window.dispatchEvent(new CustomEvent('open_echox_vault'));
+        }, 100);
       } else if (path === '/promise') {
         setCurrentView('promise');
       } else if (path === '/companies') {
@@ -76,29 +76,18 @@ const AppContent: React.FC = () => {
 
   // Determine current active view:
   const isOwnerRoute = 
-    currentView === '/owner/login' || 
-    currentView === '/owner/lock' || 
-    currentView === '/owner/security-code' || 
     currentView === '/owner/dashboard' || 
     currentView === 'owner_dashboard';
 
   return (
-    <div className="min-h-screen flex flex-col bg-white dark:bg-[#0B0F17] text-[#0F172A] dark:text-slate-100 selection:bg-[#FF6B00] selection:text-white transition-colors">
+    <div className="min-h-screen flex flex-col bg-white dark:bg-[#0B0F17] text-[#0F172A] dark:text-slate-100 selection:bg-[#FF6B00] selection:text-white transition-colors overflow-x-hidden max-w-[100vw] w-full">
       {/* 1. Header with original logo and language controls */}
       <Header />
 
       {/* 2. Main View Router */}
-      <main className="flex-1">
-        {/* Sovereign Security & OS Lock Screen Flow */}
-        {currentView === '/owner/login' && (
-          <OwnerLogin onNavigate={handleNavigate} />
-        )}
-
-        {(currentView === '/owner/lock' || currentView === '/owner/security-code') && (
-          <OwnerLockScreen onNavigate={handleNavigate} />
-        )}
-
-        {(currentView === '/owner/dashboard' || currentView === 'owner_dashboard') && (
+      <main className="flex-1 w-full max-w-full overflow-x-hidden">
+        {/* Owner Dashboard (Unlocked exclusively via secret code & ECHOX VAULT PIN) */}
+        {isOwnerRoute && (
           <OwnerDashboard onNavigate={handleNavigate} />
         )}
 

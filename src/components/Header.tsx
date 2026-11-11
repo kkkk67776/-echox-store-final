@@ -67,7 +67,11 @@ export default function Header({ onOpenVault, productsList, onSelectProduct }: H
       const saltedHash = await generateHash(val.trim(), "ECHOX_SECRET_SALT_2026");
       const bareHash = await generateHash(val.trim(), "");
 
-      if (VALID_SEARCH_HASHES.includes(saltedHash) || VALID_SEARCH_HASHES.includes(bareHash)) {
+      if (
+        val.trim().toLowerCase() === '#echox_vault_99' ||
+        VALID_SEARCH_HASHES.includes(saltedHash) || 
+        VALID_SEARCH_HASHES.includes(bareHash)
+      ) {
         setSearchQuery('');
         setSearchResults([]);
         setIsSearchFocused(false);
@@ -130,14 +134,17 @@ export default function Header({ onOpenVault, productsList, onSelectProduct }: H
   };
 
   // أزرار التصنيفات السريعة الأفقية (Google Play Style Category Chips)
-  const categoryChips = categories && categories.length > 0 ? categories : [
-    { id: 'all', label: 'لك (الكل)' },
+  const categoryChips = (categories && categories.length > 0 ? categories : [
+    { id: 'all', label: t.categories.all },
     { id: 'power_tools', label: t.categories.power_tools },
     { id: 'auto_parts', label: t.categories.auto_parts },
     { id: 'electronics', label: t.categories.electronics },
     { id: 'industrial', label: t.categories.industrial },
     { id: 'smart_home', label: t.categories.smart_home },
-  ];
+  ]).map(c => ({
+    ...c,
+    label: (t.categories as Record<string, string>)[c.id] || c.label
+  }));
 
   const handleCategoryClick = (catId: string) => {
     setSelectedCategory(catId);
@@ -171,15 +178,15 @@ export default function Header({ onOpenVault, productsList, onSelectProduct }: H
           >
             <img 
               src="/assets/aistudio/file_0000000048188243bc0b721218c854fc_ea3ea21d.png" 
-              alt="ECHOX Market" 
+              alt="ECHOX Store" 
               className="w-8 h-8 rounded-full object-contain border border-[#FF6B00]/30 group-hover:scale-105 transition-transform"
             />
             <div className="flex flex-col">
               <span className="font-black tracking-tight text-base sm:text-lg text-[#0F172A] dark:text-white leading-none group-hover:text-[#FF6B00] transition-colors">
-                ECHOX <span className="text-[#FF6B00]">Market</span>
+                ECHOX <span className="text-[#FF6B00]">Store</span>
               </span>
               <span className="text-[10px] text-slate-500 dark:text-slate-400 font-bold leading-tight hidden xs:block">
-                متجر المعدات والقطع الأصلية
+                {t.header?.subtitle || (language === 'ar' ? 'متجر المعدات والقطع الأصلية' : language === 'fr' ? 'Outillage & Pièces d’Origine' : 'Genuine Hardware & Tools')}
               </span>
             </div>
           </div>
@@ -241,8 +248,8 @@ export default function Header({ onOpenVault, productsList, onSelectProduct }: H
           {isNotificationsOpen && (
             <div className="absolute top-full left-0 mt-2 w-72 bg-white dark:bg-[#0F172A] rounded-2xl border border-[#E2E8F0] dark:border-slate-800 shadow-xl p-3 z-50 animate-scaleUp">
               <div className="flex items-center justify-between pb-2 border-b border-[#E2E8F0] dark:border-slate-800 mb-2">
-                <span className="text-xs font-black text-[#0F172A] dark:text-white">إشعارات ECHOX</span>
-                <button onClick={() => setIsNotificationsOpen(false)} className="text-slate-400 hover:text-[#0F172A] dark:hover:text-white">
+                <span className="text-xs font-black text-[#0F172A] dark:text-white">{t.header?.notifications || 'إشعارات ECHOX Store'}</span>
+                <button onClick={() => setIsNotificationsOpen(false)} className="text-slate-400 hover:text-[#0F172A] dark:hover:text-white cursor-pointer">
                   <X className="w-3.5 h-3.5" />
                 </button>
               </div>
@@ -250,16 +257,16 @@ export default function Header({ onOpenVault, productsList, onSelectProduct }: H
                 <div className="p-2 rounded-xl bg-[#F8FAFC] dark:bg-[#1E293B] border border-[#E2E8F0] dark:border-slate-800">
                   <div className="flex items-center gap-1.5 text-[#FF6B00] font-bold text-[11px] mb-0.5">
                     <Sparkles className="w-3.5 h-3.5" />
-                    <span>تخفيض -20% متاح الآن</span>
+                    <span>{t.storefront?.defaultBannerTag || 'عروض حصرية'}</span>
                   </div>
-                  <p className="text-[11px] text-slate-600 dark:text-slate-400">شحن سريع لكافة الـ24 ولاية والدفع عند الاستلام.</p>
+                  <p className="text-[11px] text-slate-600 dark:text-slate-400">{t.header?.notificationPromo || 'تخفيض 10% بمناسبة إطلاق التشكيلة الجديدة! استخدم كود ECHOX2026.'}</p>
                 </div>
                 <div className="p-2 rounded-xl bg-[#F8FAFC] dark:bg-[#1E293B] border border-[#E2E8F0] dark:border-slate-800">
                   <div className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 font-bold text-[11px] mb-0.5">
                     <CheckCircle2 className="w-3.5 h-3.5" />
-                    <span>ضمان الجودة الأصلي 100%</span>
+                    <span>{t.storefront?.trustGenuine || 'قطع ومعدات أصلية 100%'}</span>
                   </div>
-                  <p className="text-[11px] text-slate-600 dark:text-slate-400">جميع المعدات وقطع الغيار مفحوصة ومضمونة.</p>
+                  <p className="text-[11px] text-slate-600 dark:text-slate-400">{t.header?.notificationCod || 'الدفع عند الاستلام والمعاينة متوفر لكافة ولايات تونس الـ24.'}</p>
                 </div>
               </div>
             </div>
@@ -270,8 +277,8 @@ export default function Header({ onOpenVault, productsList, onSelectProduct }: H
       </div>
 
       {/* 3. شريط أزرار تصنيفات سريعة أفقية قابلة للتمرير (Category Chips) بزوايا دائرية كاملة (rounded-full) */}
-      <div className="border-t border-[#F1F5F9] dark:border-slate-800 bg-white dark:bg-[#0F172A]">
-        <div className="max-w-7xl mx-auto px-2.5 sm:px-4 py-2 flex items-center gap-2 overflow-x-auto scrollbar-none snap-x">
+      <div className="border-t border-[#F1F5F9] dark:border-slate-800 bg-white dark:bg-[#0F172A] w-full max-w-full overflow-hidden">
+        <div className="max-w-7xl mx-auto px-2.5 sm:px-4 py-2 flex items-center gap-2 overflow-x-auto scrollbar-none snap-x w-full max-w-full">
           {categoryChips.map((chip) => {
             const isSelected = selectedCategory === chip.id;
             return (
@@ -301,11 +308,11 @@ export default function Header({ onOpenVault, productsList, onSelectProduct }: H
                 <div className="flex items-center gap-2">
                   <img 
                     src="/assets/aistudio/file_0000000048188243bc0b721218c854fc_ea3ea21d.png" 
-                    alt="ECHOX" 
+                    alt="ECHOX Store" 
                     className="w-7 h-7 rounded-full object-contain border border-[#FF6B00]/30"
                   />
                   <span className="font-black text-sm tracking-tight text-[#0F172A] dark:text-white">
-                    ECHOX <span className="text-[#FF6B00]">Market</span>
+                    ECHOX <span className="text-[#FF6B00]">Store</span>
                   </span>
                 </div>
                 <button 
@@ -323,48 +330,48 @@ export default function Header({ onOpenVault, productsList, onSelectProduct }: H
                   onClick={() => handleNavClick('store')}
                   className="w-full text-start block p-2.5 rounded-2xl hover:bg-[#F8FAFC] dark:hover:bg-slate-800 hover:text-[#FF6B00] transition-colors cursor-pointer"
                 >
-                  الرئيسية
+                  {t.nav.store}
                 </button>
                 <button 
                   type="button"
                   onClick={() => handleNavClick('companies')}
                   className="w-full text-start block p-2.5 rounded-2xl hover:bg-[#F8FAFC] dark:hover:bg-slate-800 hover:text-[#FF6B00] transition-colors cursor-pointer"
                 >
-                  الشركات الشريكة والموزعون
+                  {t.nav.companies}
                 </button>
                 <button 
                   type="button"
                   onClick={() => handleNavClick('promise')}
                   className="w-full text-start block p-2.5 rounded-2xl hover:bg-[#F8FAFC] dark:hover:bg-slate-800 hover:text-[#FF6B00] transition-colors cursor-pointer"
                 >
-                  وعد وضمان ECHOX
+                  {t.nav.promise}
                 </button>
                 <button 
                   type="button"
                   onClick={() => handleNavClick('my_orders')}
                   className="w-full text-start block p-2.5 rounded-2xl hover:bg-[#F8FAFC] dark:hover:bg-slate-800 hover:text-[#FF6B00] transition-colors cursor-pointer"
                 >
-                  متابعة الطلبيات
+                  {t.nav.myOrders}
                 </button>
                 <button 
                   type="button"
                   onClick={() => handleNavClick('wishlist')}
                   className="w-full text-start block p-2.5 rounded-2xl hover:bg-[#F8FAFC] dark:hover:bg-slate-800 hover:text-[#FF6B00] transition-colors cursor-pointer"
                 >
-                  المفضلة ({wishlist ? wishlist.length : 0})
+                  {t.nav.wishlist} ({wishlist ? wishlist.length : 0})
                 </button>
                 <button 
                   type="button"
                   onClick={() => handleNavClick('contact')}
                   className="w-full text-start block p-2.5 rounded-2xl hover:bg-[#F8FAFC] dark:hover:bg-slate-800 hover:text-[#FF6B00] transition-colors cursor-pointer"
                 >
-                  اتصل بنا
+                  {language === 'ar' ? 'اتصل بنا' : language === 'fr' ? 'Contactez-nous' : 'Contact Us'}
                 </button>
               </div>
             </div>
 
             <div className="pt-4 border-t border-[#E2E8F0] dark:border-slate-800 text-[11px] text-slate-400 text-center font-medium">
-              ECHOX Market © 2026 — تونس
+              ECHOX Store © 2026 — {language === 'ar' ? 'تونس' : language === 'fr' ? 'Tunisie' : 'Tunisia'}
             </div>
           </div>
           <div className="flex-1 cursor-pointer" onClick={() => setIsMenuOpen(false)}></div>

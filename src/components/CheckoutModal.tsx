@@ -58,7 +58,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({ isOpen, onClose })
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!fullName || !phone || !governorate || !city || !street) {
-      alert('يرجى ملء جميع الحقول الإلزامية للعنوان التونسي.');
+      alert(t.checkout.requiredFieldsAlert || 'يرجى ملء جميع الحقول الإلزامية للعنوان التونسي.');
       return;
     }
 
@@ -340,8 +340,8 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({ isOpen, onClose })
                       />
                     </div>
                     <div>
-                      <p className="text-xs font-bold text-slate-900">بوابة Konnect تونس</p>
-                      <p className="text-[11px] text-slate-500 mt-1">بطاقات بنكية / E-Dinar البريد التونسي</p>
+                      <p className="text-xs font-bold text-slate-900">{t.checkout.konnect || 'بوابة Konnect تونس'}</p>
+                      <p className="text-[11px] text-slate-500 mt-1">{t.checkout.konnectNote || 'بطاقات بنكية / E-Dinar البريد التونسي'}</p>
                     </div>
                   </label>
 
@@ -362,8 +362,8 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({ isOpen, onClose })
                       />
                     </div>
                     <div>
-                      <p className="text-xs font-bold text-slate-900">محفظة Flouci الرقمية</p>
-                      <p className="text-[11px] text-slate-500 mt-1">الدفع السريع بالهاتف في تونس</p>
+                      <p className="text-xs font-bold text-slate-900">{t.checkout.flouci || 'محفظة Flouci الرقمية'}</p>
+                      <p className="text-[11px] text-slate-500 mt-1">{t.checkout.flouciNote || 'الدفع السريع بالهاتف في تونس'}</p>
                     </div>
                   </label>
                 </div>
@@ -376,7 +376,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({ isOpen, onClose })
               {/* Order Total Review */}
               <div className="p-4 rounded-2xl bg-[#FAF8F5] border border-[#E8E4DD] flex items-center justify-between">
                 <div>
-                  <span className="text-xs text-slate-500 block">المبلغ المطلوب سداده:</span>
+                  <span className="text-xs text-slate-500 block">{t.checkout.totalPayable || 'المبلغ المطلوب سداده:'}</span>
                   <span className="text-xl font-black text-[#FF6B00] tabular-nums">
                     {cartTotal.toFixed(3)} {t.cart.currency}
                   </span>

@@ -76,7 +76,7 @@ export const FloatingActions: React.FC = () => {
 
             {/* خيار 1: واتساب مباشر */}
             <a
-              href={`https://wa.me/${siteSettings.whatsappPhone}?text=مرحباً%20ECHOX%20Market%20تونس،%20أود%20الاستفسار%20عن`}
+              href={`https://wa.me/${siteSettings.whatsappPhone}?text=مرحباً%20ECHOX%20Store%20تونس،%20أود%20الاستفسار%20عن`}
               target="_blank"
               rel="noreferrer"
               onClick={() => setHubOpen(false)}
