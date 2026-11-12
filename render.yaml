@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: echoxstore
+    runtime: node
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: NODE_ENV=production npx tsx server.ts
+    healthCheckPath: /api/payments/config
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: SITE_URL
+        value: https://echoxstore.onrender.com
+      - key: ECHOX_SECURITY_HMAC_SECRET
+        generateValue: true

@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 
 export const Footer: React.FC = () => {
-  const { siteSettings, language, t, setCurrentView } = useStore();
+  const { siteSettings, language, t, setCurrentView, setIsSupportModalOpen } = useStore();
 
   const handleLinkClick = (view: string) => {
     setCurrentView(view);
@@ -24,7 +24,7 @@ export const Footer: React.FC = () => {
           <div className="space-y-3">
             <div className="flex items-center gap-2.5">
               <img 
-                src="/assets/aistudio/file_0000000048188243bc0b721218c854fc_ea3ea21d.png" 
+                src="/assets/images/echox-logo.webp" 
                 alt="ECHOX Logo" 
                 className="w-8 h-8 rounded-full object-contain border border-[#FF6B00]/40"
               />
@@ -88,6 +88,15 @@ export const Footer: React.FC = () => {
                   className="hover:text-[#FF6B00] transition-colors cursor-pointer text-start"
                 >
                   {t.nav.myOrders}
+                </button>
+              </li>
+              <li>
+                <button
+                  type="button"
+                  onClick={() => setIsSupportModalOpen(true)}
+                  className="text-[#FF6B00] hover:underline font-bold transition-colors cursor-pointer text-start"
+                >
+                  {t.supportEchox.navLabel}
                 </button>
               </li>
             </ul>

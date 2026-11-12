@@ -1,8 +1,8 @@
 [build]
-  command = "bun run build"
+  command = "npm run build"
   publish = "dist"
 
-# Single-page app fallback so direct links like /owner/login, /promise, /contact work
+# Single-page app fallback so direct links like /promise, /companies, /contact work
 [[redirects]]
   from = "/*"
   to = "/index.html"
@@ -13,15 +13,34 @@
   for = "/*"
   [headers.values]
     Strict-Transport-Security = "max-age=63072000; includeSubDomains; preload"
-    X-Frame-Options = "DENY"
+    X-Frame-Options = "SAMEORIGIN"
     X-Content-Type-Options = "nosniff"
     Referrer-Policy = "strict-origin-when-cross-origin"
     Permissions-Policy = "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
     Cross-Origin-Opener-Policy = "same-origin-allow-popups"
-    X-XSS-Protection = "0"
 
-# Keep private owner pages out of search results
+# Keep private admin/account/api routes out of search results
 [[headers]]
   for = "/owner/*"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+
+[[headers]]
+  for = "/my_orders"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+
+[[headers]]
+  for = "/account"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+
+[[headers]]
+  for = "/wishlist"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+
+[[headers]]
+  for = "/api/*"
   [headers.values]
     X-Robots-Tag = "noindex, nofollow"

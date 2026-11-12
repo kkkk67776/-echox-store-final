@@ -15,6 +15,7 @@ import {
   Shield
 } from 'lucide-react';
 import { TUNISIAN_GOVERNORATES, getGovernorateName } from '../data/governorates';
+import { getPaymentStatusTone } from '../lib/payments';
 
 export const CustomerPortal: React.FC = () => {
   const { 
@@ -230,7 +231,10 @@ export const CustomerPortal: React.FC = () => {
                     <span className="text-xs text-slate-400 block">رقم التتبع:</span>
                     <span className="font-mono font-bold text-sm text-[#FF6B00]">{order.trackingNumber}</span>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className={`text-[11px] px-2.5 py-1 rounded-full font-bold border ${getPaymentStatusTone(order.paymentStatus)}`}>
+                      {(t.payments.statuses as Record<string, string>)[order.paymentStatus] || order.paymentStatus}
+                    </span>
                     <span className="text-xs bg-slate-100 px-3 py-1 rounded-full font-bold text-slate-800">
                       {t.orderStatus[order.status] || order.status}
                     </span>

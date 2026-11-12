@@ -5,6 +5,24 @@ import dotenv from 'dotenv';
 import path from 'path';
 import fs from 'fs';
 import argon2 from 'argon2';
+import {
+  getPublicPaymentConfig,
+  syncCatalogSnapshot,
+  updateAdminPaymentConfig,
+  testOnlineGatewayConnection,
+  processServerCheckout,
+  submitBankTransferProof,
+  adminVerifyPayment,
+  adminProcessRefundOrCancel,
+  createCustomerRefundOrCancelRequest,
+  adminUpdateOrderStatus,
+  adminSettleVendorPayout,
+  getScopedVendorFinancials,
+  getAdminPaymentOverview,
+  handlePaymentWebhook,
+  createSupportContribution,
+  adminVerifySupportTransaction,
+} from './server/paymentEngine';
 
 dotenv.config();
 
@@ -19,30 +37,149 @@ if (process.env.VITE_FIREBASE_MEASUREMENT_ID === 'VITE_FIREBASE_API_KEY') {
 const app = express();
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
-app.use(express.json());
+app.use(express.json({ limit: '6mb' }));
+
+function getRequestOrigin(req: Request): string {
+  const configured = (process.env.SITE_URL || process.env.VITE_SITE_URL || '').trim().replace(/\/$/, '');
+  if (configured) return configured;
+
+  const protoHeader = (req.headers['x-forwarded-proto'] as string) || req.protocol || 'https';
+  const proto = protoHeader.split(',')[0].trim();
+  const hostHeader = (req.headers['x-forwarded-host'] as string) || req.get('host') || '';
+  if (hostHeader && !hostHeader.includes('localhost') && !hostHeader.includes('127.0.0.1') && !hostHeader.includes('0.0.0.0')) {
+    return `${proto}://${hostHeader}`.replace(/\/$/, '');
+  }
+  return 'https://echoxstore.pages.dev';
+}
+
+function escapeXml(str: string): string {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+function getDynamicCatalogProductIds(): string[] {
+  const fallbackIds = ['prod_titan_drill', 'prod_aether_headlight', 'prod_fluke_multimeter'];
+  try {
+    const paymentDbPath = path.resolve(process.cwd(), 'payment_system_data.json');
+    if (fs.existsSync(paymentDbPath)) {
+      const data = JSON.parse(fs.readFileSync(paymentDbPath, 'utf-8'));
+      if (data?.catalog && typeof data.catalog === 'object') {
+        const activeIds = Object.values(data.catalog as Record<string, { id?: string; active?: boolean }>)
+          .filter((item) => item && item.id && item.active !== false)
+          .map((item) => String(item.id));
+        if (activeIds.length > 0) {
+          return Array.from(new Set([...fallbackIds, ...activeIds]));
+        }
+      }
+    }
+  } catch {
+    // Fallback gracefully to core catalog IDs
+  }
+  return fallbackIds;
+}
+
+// Security & SEO indexing headers middleware for private, admin, and API routes
+app.use((req: Request, res: Response, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  const p = req.path.toLowerCase();
+  if (
+    p.startsWith('/owner') ||
+    p === '/my_orders' ||
+    p === '/orders' ||
+    p === '/account' ||
+    p === '/wishlist' ||
+    p.startsWith('/api/')
+  ) {
+    res.setHeader('X-Robots-Tag', 'noindex, nofollow');
+  }
+  next();
+});
 
 // Google Search Console HTML file verification handler
 app.get('/google:id.html', (req: Request, res: Response) => {
-  res.setHeader('Content-Type', 'text/html');
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.send(`google-site-verification: google${req.params.id}.html`);
 });
 
-// Search Engine Optimization: robots.txt and sitemap.xml
-app.get('/robots.txt', (_req: Request, res: Response) => {
-  res.setHeader('Content-Type', 'text/plain');
+// Search Engine Optimization: dynamic domain-aware robots.txt and sitemap.xml
+app.get('/robots.txt', (req: Request, res: Response) => {
+  const origin = getRequestOrigin(req);
+  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  res.setHeader('Cache-Control', 'public, max-age=3600');
   res.send(`User-agent: *
 Allow: /
-Sitemap: https://ais-pre-h73tzqybodmt5v2ji4xgqc-519756359948.europe-west2.run.app/sitemap.xml
+Allow: /promise
+Allow: /companies
+Allow: /contact
+Allow: /assets/
+Disallow: /owner
+Disallow: /owner/
+Disallow: /owner_dashboard
+Disallow: /my_orders
+Disallow: /account
+Disallow: /wishlist
+Disallow: /api/
+
+Sitemap: ${origin}/sitemap.xml
 `);
 });
 
-app.get('/sitemap.xml', (_req: Request, res: Response) => {
-  const sitemapPath = path.resolve(process.cwd(), 'public', 'sitemap.xml');
-  if (fs.existsSync(sitemapPath)) {
-    res.setHeader('Content-Type', 'application/xml');
-    return res.sendFile(sitemapPath);
-  }
-  res.status(404).send('Not found');
+app.get('/sitemap.xml', (req: Request, res: Response) => {
+  const origin = getRequestOrigin(req);
+  const lastmod = new Date().toISOString().slice(0, 10);
+  const productIds = getDynamicCatalogProductIds();
+
+  const staticRoutes = [
+    { loc: '/', changefreq: 'daily', priority: '1.0', multilingual: true },
+    { loc: '/promise', changefreq: 'monthly', priority: '0.8', multilingual: true },
+    { loc: '/companies', changefreq: 'weekly', priority: '0.8', multilingual: true },
+    { loc: '/contact', changefreq: 'monthly', priority: '0.7', multilingual: true },
+    { loc: '/?category=power_tools', changefreq: 'weekly', priority: '0.8', multilingual: false },
+    { loc: '/?category=auto_parts', changefreq: 'weekly', priority: '0.8', multilingual: false },
+    { loc: '/?category=electronics', changefreq: 'weekly', priority: '0.8', multilingual: false },
+  ];
+
+  const productRoutes = productIds.map((id) => ({
+    loc: `/?product=${encodeURIComponent(id)}`,
+    changefreq: 'weekly',
+    priority: '0.9',
+    multilingual: true,
+  }));
+
+  const entries = [...staticRoutes, ...productRoutes]
+    .map((entry) => {
+      const fullUrl = `${origin}${entry.loc}`;
+      const sep = entry.loc.includes('?') ? '&' : '?';
+      const alternates = entry.multilingual
+        ? `
+    <xhtml:link rel="alternate" hreflang="ar-TN" href="${escapeXml(`${fullUrl}${sep}lang=ar`)}" />
+    <xhtml:link rel="alternate" hreflang="fr-TN" href="${escapeXml(`${fullUrl}${sep}lang=fr`)}" />
+    <xhtml:link rel="alternate" hreflang="en" href="${escapeXml(`${fullUrl}${sep}lang=en`)}" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="${escapeXml(fullUrl)}" />`
+        : '';
+
+      return `  <url>
+    <loc>${escapeXml(fullUrl)}</loc>
+    <lastmod>${lastmod}</lastmod>
+    <changefreq>${entry.changefreq}</changefreq>
+    <priority>${entry.priority}</priority>${alternates}
+  </url>`;
+    })
+    .join('\n');
+
+  res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+  res.setHeader('Cache-Control', 'public, max-age=3600');
+  res.send(`<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+        xmlns:xhtml="http://www.w3.org/1999/xhtml">
+${entries}
+</urlset>
+`);
 });
 
 // Sovereign Security Config
@@ -1016,17 +1153,230 @@ app.get('/api/security/systemStatus', (_req: Request, res: Response) => {
   });
 });
 
-// --- VITE MIDDLEWARE INTEGRATION ---
-async function startServer() {
-  const vite = await createViteServer({
-    server: { middlewareMode: true },
-    appType: 'spa',
-  });
+// ==========================================
+// 💳 ECHOX PROFESSIONAL PAYMENT SYSTEM APIS
+// ==========================================
 
-  app.use(vite.middlewares);
+function requireAdminAuth(req: Request, res: Response): { email: string } | null {
+  const cookies = parseCookies(req);
+  const cookieVal = cookies['__session'];
+  if (!cookieVal) {
+    res.status(401).json({ error: 'وصول مرفوض: جلسة مركز التحكم مطلوبة.' });
+    return null;
+  }
+  const rawSessionId = verifySignedSession(cookieVal);
+  if (!rawSessionId) {
+    res.status(401).json({ error: 'توقيع الجلسة غير صالح.' });
+    return null;
+  }
+  const session = activeSessions.get(rawSessionId);
+  if (!session || session.expiresAt < Date.now() || session.email !== OWNER_EMAIL || !session.owner || !session.codeVerified) {
+    res.status(403).json({ error: 'وصول غير مصرح به: صلاحيات مركز التحكم مطلوبة.' });
+    return null;
+  }
+  return { email: session.email };
+}
+
+// 1. Public Payment Config (never exposes server secrets)
+app.get('/api/payments/config', (_req: Request, res: Response) => {
+  return res.json(getPublicPaymentConfig());
+});
+
+// 2. Catalog Price Sync (Admin only can overwrite catalog prices)
+app.post('/api/admin/payments/catalog-sync', (req: Request, res: Response) => {
+  if (!requireAdminAuth(req, res)) return;
+  const { products } = req.body || {};
+  syncCatalogSnapshot(products);
+  return res.json({ success: true });
+});
+
+// 3. Server-Verified Multi-Vendor Checkout
+app.post('/api/payments/checkout', async (req: Request, res: Response) => {
+  try {
+    const result = await processServerCheckout(req.body);
+    if (!result.ok) {
+      return res.status(result.statusCode || 400).json({ success: false, error: result.error });
+    }
+    return res.json({
+      success: true,
+      order: result.order,
+      transaction: result.transaction,
+      paymentUrl: result.paymentUrl,
+    });
+  } catch (err: any) {
+    console.error('[Payments] Checkout error:', err);
+    return res.status(500).json({ success: false, error: 'تعذر إتمام عملية الدفع على الخادم.' });
+  }
+});
+
+// 4. Customer Submit Bank Transfer Proof
+app.post('/api/payments/bank-transfer/proof', (req: Request, res: Response) => {
+  const cookies = parseCookies(req);
+  const rawSid = cookies['__session'] ? verifySignedSession(cookies['__session']) : null;
+  const isAdmin = Boolean(rawSid && activeSessions.get(rawSid)?.codeVerified);
+
+  const result = submitBankTransferProof({
+    ...(req.body || {}),
+    isAdmin,
+  });
+  if (!result.ok) {
+    return res.status(result.statusCode || 400).json({ success: false, error: result.error });
+  }
+  return res.json({ success: true, order: result.order });
+});
+
+// 5. Customer Request Cancellation / Refund
+app.post('/api/payments/request-refund', (req: Request, res: Response) => {
+  const result = createCustomerRefundOrCancelRequest(req.body || {});
+  if (!result.ok) {
+    return res.status(result.statusCode || 400).json({ success: false, error: result.error });
+  }
+  return res.json({ success: true, refundRequest: result.refundRequest });
+});
+
+// 6. Server-Side Payment Webhook (Signature Verified + Idempotent Replay Guard)
+app.post('/api/payments/webhook/:provider', async (req: Request, res: Response) => {
+  const provider = req.params.provider || 'konnect';
+  const sigHeader =
+    (req.headers['x-konnect-signature'] as string) ||
+    (req.headers['x-signature'] as string) ||
+    (req.headers['x-webhook-signature'] as string);
+
+  const result = await handlePaymentWebhook({
+    provider,
+    signatureHeader: sigHeader,
+    rawBody: req.body,
+  });
+  return res.status(result.statusCode).json(result);
+});
+
+// 7. Scoped Vendor Financial Ledger View (Strict Vendor Data Isolation)
+app.get('/api/vendor/:vendorId/financials', (req: Request, res: Response) => {
+  const vendorId = String(req.params.vendorId || '').trim();
+  if (!vendorId) {
+    return res.status(400).json({ error: 'معرف البائع مطلوب.' });
+  }
+  return res.json(getScopedVendorFinancials(vendorId));
+});
+
+// 8. Independent Support ECHOX Endpoints
+app.post('/api/support/contribute', (req: Request, res: Response) => {
+  const result = createSupportContribution(req.body || {});
+  if (!result.ok) {
+    return res.status(result.statusCode || 400).json({ success: false, error: result.error });
+  }
+  return res.json({ success: true, supportTransaction: result.supportTransaction });
+});
+
+// 9. Admin Panel Payment Management Routes (Protected by requireAdminAuth)
+app.get('/api/admin/payments/config', (req: Request, res: Response) => {
+  if (!requireAdminAuth(req, res)) return;
+  return res.json(getPublicPaymentConfig());
+});
+
+app.put('/api/admin/payments/config', (req: Request, res: Response) => {
+  if (!requireAdminAuth(req, res)) return;
+  const result = updateAdminPaymentConfig(req.body || {});
+  if (!result.ok) {
+    return res.status(400).json({ success: false, error: result.error });
+  }
+  return res.json({ success: true, config: result.config });
+});
+
+app.post('/api/admin/payments/test-gateway', async (req: Request, res: Response) => {
+  if (!requireAdminAuth(req, res)) return;
+  const check = await testOnlineGatewayConnection();
+  return res.json(check);
+});
+
+app.get('/api/admin/payments/overview', (req: Request, res: Response) => {
+  if (!requireAdminAuth(req, res)) return;
+  return res.json(getAdminPaymentOverview());
+});
+
+app.post('/api/admin/payments/verify', (req: Request, res: Response) => {
+  const admin = requireAdminAuth(req, res);
+  if (!admin) return;
+  const result = adminVerifyPayment({
+    ...(req.body || {}),
+    adminEmail: admin.email,
+  });
+  if (!result.ok) {
+    return res.status(result.statusCode || 400).json({ success: false, error: result.error });
+  }
+  return res.json({ success: true, order: result.order, transaction: result.transaction });
+});
+
+app.post('/api/admin/payments/refund', (req: Request, res: Response) => {
+  if (!requireAdminAuth(req, res)) return;
+  const result = adminProcessRefundOrCancel(req.body || {});
+  if (!result.ok) {
+    return res.status(result.statusCode || 400).json({ success: false, error: result.error });
+  }
+  return res.json({ success: true, order: result.order });
+});
+
+app.post('/api/admin/payments/vendor-payout', (req: Request, res: Response) => {
+  if (!requireAdminAuth(req, res)) return;
+  const { vendorId, settlementNote } = req.body || {};
+  if (!vendorId) {
+    return res.status(400).json({ success: false, error: 'معرف البائع مطلوب.' });
+  }
+  const result = adminSettleVendorPayout(vendorId, settlementNote);
+  return res.json({ success: true, ...result });
+});
+
+app.post('/api/admin/support/verify', (req: Request, res: Response) => {
+  if (!requireAdminAuth(req, res)) return;
+  const { id, action } = req.body || {};
+  const result = adminVerifySupportTransaction(id, action);
+  if (!result.ok) {
+    return res.status(result.statusCode || 400).json({ success: false, error: result.error });
+  }
+  return res.json({ success: true, supportTransaction: result.supportTransaction });
+});
+
+app.patch('/api/admin/orders/:orderId/status', (req: Request, res: Response) => {
+  if (!requireAdminAuth(req, res)) return;
+  const { status, note } = req.body || {};
+  const result = adminUpdateOrderStatus(req.params.orderId, status, note);
+  if (!result.ok) {
+    return res.status(result.statusCode || 409).json({ success: false, error: result.error });
+  }
+  return res.json({ success: true, order: result.order });
+});
+
+// --- PRODUCTION STATIC OR VITE DEV MIDDLEWARE ---
+async function startServer() {
+  const isProd = process.env.NODE_ENV === 'production';
+  const distDir = path.resolve(process.cwd(), 'dist');
+
+  if (isProd && fs.existsSync(distDir)) {
+    app.use(
+      '/assets',
+      express.static(path.join(distDir, 'assets'), {
+        maxAge: '365d',
+        immutable: true,
+      })
+    );
+    app.use(express.static(distDir));
+    app.get('*', (req: Request, res: Response) => {
+      if (req.path.startsWith('/api/')) {
+        return res.status(404).json({ success: false, error: 'Endpoint not found' });
+      }
+      return res.sendFile(path.join(distDir, 'index.html'));
+    });
+  } else {
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: 'spa',
+    });
+
+    app.use(vite.middlewares);
+  }
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`[ECHOX STORE] Full-Stack Server listening on http://0.0.0.0:${PORT}`);
+    console.log(`[ECHOX STORE] Full-Stack Server (${isProd ? 'production' : 'development'}) listening on http://0.0.0.0:${PORT}`);
   });
 }
 

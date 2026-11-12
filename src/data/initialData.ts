@@ -4,7 +4,7 @@ export const INITIAL_COMPANIES: Company[] = [
   {
     id: 'comp_echox',
     name: 'ECHOX Distribution Tunisie',
-    logo: '/assets/aistudio/file_0000000048188243bc0b721218c854fc_ea3ea21d.png',
+    logo: '/assets/images/echox-logo.webp',
     phone: '+216 21 511 162',
     email: 'abdelkaderbahri570@gmail.com',
     address: 'المركب التكنولوجي الغزالة، تونس',
@@ -14,12 +14,12 @@ export const INITIAL_COMPANIES: Company[] = [
       fr: 'Distributeur officiel des équipements et composants certifiés ECHOX en Tunisie.',
       en: 'Official distributor of certified ECHOX hardware & equipment in Tunisia.'
     },
-    website: 'https://ais-pre-h73tzqybodmt5v2ji4xgqc-519756359948.europe-west2.run.app'
+    website: 'https://echoxstore.tn'
   },
   {
     id: 'comp_atlas',
     name: 'Atlas Mécanique & Pièces Sfax',
-    logo: '/assets/aistudio/file_0000000048188243bc0b721218c854fc_ea3ea21d.png',
+    logo: '/assets/images/echox-logo.webp',
     phone: '+216 74 200 450',
     email: 'contact@atlas-mecanique.tn',
     address: 'طريق قابس كلم 3، صفاقس',
@@ -33,7 +33,7 @@ export const INITIAL_COMPANIES: Company[] = [
   {
     id: 'comp_med_elec',
     name: 'Méditerranée Électronique & Mesure',
-    logo: '/assets/aistudio/file_0000000048188243bc0b721218c854fc_ea3ea21d.png',
+    logo: '/assets/images/echox-logo.webp',
     phone: '+216 73 344 112',
     email: 'info@med-elec.tn',
     address: 'شارع الحبيب بورقيبة، سوسة',
@@ -67,8 +67,8 @@ export const INITIAL_PRODUCTS: Product[] = [
     companyName: 'ECHOX Distribution Tunisie',
     governorate: 'tunis',
     images: [
-      '/src/assets/images/product_drill_cordless_pro_1793963107063.jpg',
-      '/src/assets/images/hero_echox_tunisia_store_1793963107162.jpg'
+      '/assets/images/product_drill_cordless_pro.webp',
+      '/assets/images/hero_echox_tunisia_store.webp'
     ],
     featured: true,
     active: true,
@@ -119,7 +119,7 @@ export const INITIAL_PRODUCTS: Product[] = [
     companyName: 'Atlas Mécanique & Pièces Sfax',
     governorate: 'sfax',
     images: [
-      '/src/assets/images/product_automotive_headlight_1793963107421.jpg'
+      '/assets/images/product_automotive_headlight.webp'
     ],
     featured: true,
     active: true,
@@ -161,7 +161,7 @@ export const INITIAL_PRODUCTS: Product[] = [
     companyName: 'Méditerranée Électronique & Mesure',
     governorate: 'sousse',
     images: [
-      '/src/assets/images/product_digital_multimeter_1793963108203.jpg'
+      '/assets/images/product_digital_multimeter.webp'
     ],
     featured: true,
     active: true,
@@ -211,7 +211,7 @@ export const INITIAL_ORDERS: Order[] = [
           fr: 'Perceuse Visseuse Sans Fil TITAN HD 20V Brushless',
           en: 'TITAN HD 20V Max Brushless Heavy-Duty Drill'
         },
-        productImage: '/src/assets/images/product_drill_cordless_pro_1793963107063.jpg',
+        productImage: '/assets/images/product_drill_cordless_pro.webp',
         unitPrice: 345.000,
         quantity: 1,
         totalPrice: 345.000
@@ -260,7 +260,7 @@ export const INITIAL_ORDERS: Order[] = [
           fr: 'Multimètre Industriel Numérique True-RMS FLUKE 87V Max',
           en: 'FLUKE 87V Max Industrial Digital True-RMS Multimeter'
         },
-        productImage: '/src/assets/images/product_digital_multimeter_1793963108203.jpg',
+        productImage: '/assets/images/product_digital_multimeter.webp',
         unitPrice: 520.000,
         quantity: 1,
         totalPrice: 520.000
@@ -293,7 +293,7 @@ export const INITIAL_OWNER_SETTINGS: OwnerSettings = {
   secondaryPhone: '+216 21 511 162', // Editable contact phone
   contactEmail: 'contact@echox-store.tn',
   loginEmail: 'abdelkaderbahri570@gmail.com', // Locked sovereign Google email
-  photoUrl: '/assets/aistudio/file_0000000048188243bc0b721218c854fc_ea3ea21d.png',
+  photoUrl: '/assets/images/echox-logo.webp',
   bio: {
     ar: 'مالك ومؤسس منصة ECHOX Store تونس. متخصص في سلاسل الإمداد للقطع الأصلية والأجهزة التقنية الدقيقة.',
     fr: 'Fondateur et propriétaire d’ECHOX Store Tunisie, dédié aux pièces industrielles et d’origine.',

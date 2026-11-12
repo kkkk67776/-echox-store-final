@@ -6,3 +6,21 @@
 
 /assets/*
   Cache-Control: public, max-age=31536000, immutable
+
+/owner/*
+  X-Robots-Tag: noindex, nofollow
+
+/owner_dashboard
+  X-Robots-Tag: noindex, nofollow
+
+/my_orders
+  X-Robots-Tag: noindex, nofollow
+
+/account
+  X-Robots-Tag: noindex, nofollow
+
+/wishlist
+  X-Robots-Tag: noindex, nofollow
+
+/api/*
+  X-Robots-Tag: noindex, nofollow

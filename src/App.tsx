@@ -10,6 +10,7 @@ import { StorefrontView } from './components/StorefrontView';
 import { ProductDetailModal } from './components/ProductDetailModal';
 import { CartDrawer } from './components/CartDrawer';
 import { CheckoutModal } from './components/CheckoutModal';
+import { SupportEchoxModal } from './components/SupportEchoxModal';
 import { OrderTrackingView } from './components/OrderTrackingView';
 import { CustomerPortal } from './components/CustomerPortal';
 import { OwnerDashboard } from './components/OwnerDashboard';
@@ -21,18 +22,43 @@ import { BottomNavigation } from './components/BottomNavigation';
 import { applySeo } from './lib/seo';
 
 const AppContent: React.FC = () => {
-  const { currentView, setCurrentView } = useStore();
+  const {
+    currentView,
+    setCurrentView,
+    language,
+    setLanguage,
+    products,
+    selectedProductId,
+    setSelectedProductId,
+    setSelectedCategory,
+  } = useStore();
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
   const [navState, setNavState] = useState<{ challengeId?: string; devTestHint?: string }>({});
 
-  // Synchronize route with browser URL on mount and on popstate
+  // Synchronize route & query parameters (?product, ?category, ?lang) with browser URL
   useEffect(() => {
     const syncRouteFromUrl = () => {
       const path = window.location.pathname;
+      const params = new URLSearchParams(window.location.search);
+
+      const urlLang = params.get('lang');
+      if (urlLang === 'ar' || urlLang === 'fr' || urlLang === 'en') {
+        setLanguage(urlLang);
+      }
+
+      const urlCat = params.get('category');
+      if (urlCat) {
+        setSelectedCategory(urlCat);
+      }
+
+      const urlProduct = params.get('product');
+      if (urlProduct) {
+        setSelectedProductId(urlProduct);
+      }
+
       if (path === '/owner/dashboard' || path === '/owner_dashboard') {
         setCurrentView('/owner/dashboard');
       } else if (path === '/owner/login' || path === '/owner/lock' || path === '/owner/security-code') {
-        // Redundant screens removed: redirect to storefront and open ECHOX VAULT
         window.history.replaceState({}, '', '/');
         setCurrentView('store');
         setTimeout(() => {
@@ -46,6 +72,8 @@ const AppContent: React.FC = () => {
         setCurrentView('my_orders');
       } else if (path === '/account') {
         setCurrentView('account');
+      } else if (path === '/wishlist') {
+        setCurrentView('wishlist');
       } else if (path === '/contact') {
         setCurrentView('contact');
       }
@@ -54,12 +82,14 @@ const AppContent: React.FC = () => {
     syncRouteFromUrl();
     window.addEventListener('popstate', syncRouteFromUrl);
     return () => window.removeEventListener('popstate', syncRouteFromUrl);
-  }, [setCurrentView]);
+  }, [setCurrentView, setLanguage, setSelectedCategory, setSelectedProductId]);
 
-  // Keep title, description, canonical and robots tags in sync with the current page
+  const activeProduct = products.find((p) => p.id === selectedProductId) || null;
+
+  // Keep title, description, canonical, hreflang, product JSON-LD and robots tags synced
   useEffect(() => {
-    applySeo(currentView);
-  }, [currentView]);
+    applySeo(currentView, language, activeProduct);
+  }, [currentView, language, activeProduct]);
 
   const handleNavigate = (route: string, state?: any) => {
     if (state) {
@@ -108,6 +138,7 @@ const AppContent: React.FC = () => {
       <ProductDetailModal />
       <CartDrawer onOpenCheckout={() => setIsCheckoutOpen(true)} />
       <CheckoutModal isOpen={isCheckoutOpen} onClose={() => setIsCheckoutOpen(false)} />
+      <SupportEchoxModal />
       <OwnerSecurityRoom 
         onUnlockSuccess={() => handleNavigate('/owner/dashboard')} 
         onNavigate={handleNavigate} 

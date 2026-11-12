@@ -39,12 +39,15 @@ import {
   Globe,
   ExternalLink,
   MessageCircle,
-  RotateCcw
+  RotateCcw,
+  CreditCard
 } from 'lucide-react';
 import { doc, setDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { Product, Company, Order, OrderStatus, CategoryItem, PromoBanner, SiteSettings } from '../types';
 import { INITIAL_SITE_SETTINGS } from '../data/initialData';
+import { PaymentManagementTab } from './PaymentManagementTab';
+import { canOrderShipClient, getPaymentStatusTone } from '../lib/payments';
 import { TUNISIAN_GOVERNORATES, getGovernorateName } from '../data/governorates';
 import { 
   getAuthorizedOwnerEmail, 
@@ -71,6 +74,7 @@ interface OwnerDashboardProps {
 
 type DashboardTab = 
   | 'overview'
+  | 'payment_management'
   | 'account_security'
   | 'footer_info'
   | 'products'
@@ -110,6 +114,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
     orders, 
     addManualOrder,
     updateOrderStatus,
+    updateOrderInState,
     deleteOrder,
     ownerSettings, 
     updateOwnerSettings,
@@ -121,6 +126,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
 
   // Active Tab
   const [activeTab, setActiveTab] = useState<DashboardTab>('overview');
+  const [orderStatusError, setOrderStatusError] = useState<string | null>(null);
 
   // Confirmation Delete Modal
   const [deleteConfirmModal, setDeleteConfirmModal] = useState<{
@@ -570,7 +576,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
         companyId: prodCompanyId,
         companyName: selectedComp?.name || 'ECHOX Distribution',
         governorate: prodGov,
-        images: imgs.length > 0 ? imgs : ['/assets/aistudio/file_0000000048188243bc0b721218c854fc_ea3ea21d.png'],
+        images: imgs.length > 0 ? imgs : ['/assets/images/echox-logo.webp'],
         featured: prodFeatured,
         active: true,
         deliveryTimeDays: 2
@@ -632,7 +638,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
 
     addCompany({
       name: partnerName.trim(),
-      logo: partnerLogo.trim() || '/assets/aistudio/file_0000000048188243bc0b721218c854fc_ea3ea21d.png',
+      logo: partnerLogo.trim() || '/assets/images/echox-logo.webp',
       phone: partnerPhone.trim(),
       email: partnerEmail.trim() || 'contact@partner.tn',
       address: partnerAddress.trim() || 'المنطقة الصناعية',
@@ -768,7 +774,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
           <div>
             <div className="flex items-center gap-2 flex-wrap">
               <h1 className="text-base sm:text-lg font-black tracking-tight text-white leading-tight">
-                لوحة الإعدادات الشاملة للمالك
+                لوحة الإعدادات الشاملة — مركز التحكم
               </h1>
               <span className="text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded-full flex items-center gap-1">
                 <ShieldCheck className="w-3 h-3 text-emerald-400" />
@@ -876,6 +882,19 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
         >
           <LayoutDashboard className="w-3.5 h-3.5" />
           <span>نظرة عامة</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('payment_management')}
+          className={`px-4 py-2 rounded-full text-xs font-bold shrink-0 transition-all cursor-pointer flex items-center gap-1.5 active:scale-95 ${
+            activeTab === 'payment_management'
+              ? 'bg-[#FF6B00] text-white shadow-xs'
+              : 'bg-[#F8FAFC] dark:bg-[#1E293B] text-slate-700 dark:text-slate-200 border border-[#E2E8F0] dark:border-slate-800 hover:border-slate-400'
+          }`}
+        >
+          <CreditCard className="w-3.5 h-3.5" />
+          <span>{t.payments.sectionTitle}</span>
         </button>
 
         <button
@@ -1053,10 +1072,23 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
                 <span className="text-xs font-bold block">إعدادات الأمان</span>
                 <span className="text-[10px] text-slate-400">تعديل الإيميل والرمز</span>
               </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveTab('payment_management')}
+                className="p-3 bg-white dark:bg-[#0F172A] rounded-2xl border border-[#E2E8F0] dark:border-slate-700 hover:border-[#FF6B00] text-start transition-all cursor-pointer"
+              >
+                <CreditCard className="w-5 h-5 text-[#FF6B00] mb-1.5" />
+                <span className="text-xs font-bold block">{t.payments.sectionTitle}</span>
+                <span className="text-[10px] text-slate-400">البنك، البوابات، البائعين</span>
+              </button>
             </div>
           </div>
         </div>
       )}
+
+      {/* Tab 1.5: Comprehensive Payment Management Center */}
+      {activeTab === 'payment_management' && <PaymentManagementTab />}
 
       {/* Tab 2: Account & Security */}
       {activeTab === 'account_security' && (
@@ -1066,7 +1098,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
           <div className="bg-[#F8FAFC] dark:bg-[#1E293B] rounded-3xl p-4 sm:p-6 border border-[#E2E8F0] dark:border-slate-800 space-y-4">
             <div className="flex items-center gap-2 pb-3 border-b border-slate-200 dark:border-slate-700">
               <KeyRound className="w-4 h-4 text-[#FF6B00]" />
-              <h3 className="text-sm font-black">بيانات الاعتماد السيادية للمالك</h3>
+              <h3 className="text-sm font-black">بيانات الاعتماد السيادية لمركز التحكم</h3>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1074,7 +1106,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
               {/* Form 1: Modify Owner Email */}
               <form onSubmit={handleSaveEmail} className="bg-white dark:bg-[#0F172A] p-4 rounded-2xl border border-[#E2E8F0] dark:border-slate-700 space-y-3">
                 <label className="text-xs font-bold block">
-                  البريد الإلكتروني المعتمد للمالك (Gmail):
+                  البريد الإلكتروني المعتمد لمركز التحكم (Gmail):
                 </label>
                 <div className="relative">
                   <Mail className="w-4 h-4 text-slate-400 absolute right-3 top-3" />
@@ -1575,7 +1607,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
                 <div className="space-y-2">
                   <div className="flex items-center gap-2">
                     <img 
-                      src="/assets/aistudio/file_0000000048188243bc0b721218c854fc_ea3ea21d.png" 
+                      src="/assets/images/echox-logo.webp" 
                       alt="Logo" 
                       className="w-6 h-6 rounded-full border border-[#FF6B00]/40 object-contain"
                     />
@@ -2042,7 +2074,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
                 >
                   <div className="flex items-center gap-3 min-w-0">
                     <img 
-                      src={p.images[0] || '/assets/aistudio/file_0000000048188243bc0b721218c854fc_ea3ea21d.png'}
+                      src={p.images[0] || '/assets/images/echox-logo.webp'}
                       alt={prodName}
                       className="w-14 h-14 rounded-xl object-contain bg-white dark:bg-[#0F172A] border border-slate-200 dark:border-slate-700 p-1 shrink-0"
                     />
@@ -2195,7 +2227,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
               >
                 <div className="flex items-center gap-3 min-w-0">
                   <img
-                    src={comp.logo || '/assets/aistudio/file_0000000048188243bc0b721218c854fc_ea3ea21d.png'}
+                    src={comp.logo || '/assets/images/echox-logo.webp'}
                     alt={comp.name}
                     className="w-12 h-12 rounded-xl object-contain bg-white dark:bg-[#0F172A] border border-slate-200 dark:border-slate-700 p-1 shrink-0"
                   />
@@ -2359,6 +2391,22 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
             ))}
           </div>
 
+          {orderStatusError && (
+            <div className="p-3.5 rounded-2xl bg-red-500/10 border border-red-500/30 text-xs font-bold text-red-600 dark:text-red-400 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 shrink-0" />
+                <span>{orderStatusError}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setOrderStatusError(null)}
+                className="text-slate-400 hover:text-slate-700 cursor-pointer"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+
           {/* Orders Cards */}
           <div className="space-y-3">
             {filteredOrders.length === 0 ? (
@@ -2366,15 +2414,20 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
                 لا توجد طلبات مطابقة للبحث أو الفلتر
               </div>
             ) : (
-              filteredOrders.map(o => (
+              filteredOrders.map(o => {
+                const shipAllowed = canOrderShipClient(o);
+                return (
                 <div
                   key={o.id}
                   className="p-4 rounded-3xl bg-[#F8FAFC] dark:bg-[#1E293B] border border-[#E2E8F0] dark:border-slate-800 space-y-3 shadow-2xs"
                 >
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <span className="text-xs font-black font-mono bg-white dark:bg-[#0F172A] px-2.5 py-1 rounded-xl border border-slate-200 dark:border-slate-700">
                         {o.trackingNumber}
+                      </span>
+                      <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full border ${getPaymentStatusTone(o.paymentStatus)}`}>
+                        {(t.payments.statuses as Record<string, string>)[o.paymentStatus] || o.paymentStatus}
                       </span>
                       <span className="text-[10px] text-slate-400 font-mono">
                         {new Date(o.createdAt).toLocaleDateString('ar-TN')}
@@ -2382,8 +2435,8 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
                     </div>
 
                     <div className="flex items-center gap-1.5">
-                      <span className="text-sm font-black text-[#FF6B00] font-mono">
-                        {o.totalAmount.toFixed(3)} د.ت
+                      <span className="text-sm font-black text-[#FF6B00] font-mono tabular-nums">
+                        {o.totalAmount.toFixed(3)} {o.currency || 'د.ت'}
                       </span>
                       <button
                         type="button"
@@ -2409,28 +2462,68 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
                       </a>
                     </div>
                     <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                      {o.shippingAddress?.governorate ? `ولاية ${o.shippingAddress.governorate}` : ''} • {o.shippingAddress?.city || ''}
+                      {o.shippingAddress?.governorate ? `ولاية ${o.shippingAddress.governorate}` : ''} • {o.shippingAddress?.city || ''} • وسيلة الدفع: <strong className="font-mono">{o.paymentMethod}</strong>
+                      {o.paymentReference && <> • المرجع: <strong className="font-mono">{o.paymentReference}</strong></>}
                     </p>
                   </div>
+
+                  {!shipAllowed && (
+                    <div className="p-2 rounded-xl bg-amber-500/10 border border-amber-500/20 text-[11px] text-amber-700 dark:text-amber-300 flex items-center justify-between gap-2">
+                      <span>{t.payments.shippingBlockedUnpaid}</span>
+                      <button
+                        type="button"
+                        onClick={() => setActiveTab('payment_management')}
+                        className="text-[11px] font-black text-[#FF6B00] hover:underline shrink-0 cursor-pointer"
+                      >
+                        مراجعة وتأكيد الدفع ←
+                      </button>
+                    </div>
+                  )}
 
                   {/* Status Selection */}
                   <div className="pt-2 border-t border-slate-200 dark:border-slate-700 flex items-center justify-between gap-2">
                     <span className="text-[11px] font-bold text-slate-500">حالة الشحن:</span>
                     <select
                       value={o.status}
-                      onChange={e => updateOrderStatus(o.id, e.target.value as OrderStatus)}
+                      onChange={async e => {
+                        const targetStatus = e.target.value as OrderStatus;
+                        setOrderStatusError(null);
+                        const clientRes = updateOrderStatus(o.id, targetStatus);
+                        if (!clientRes.ok) {
+                          setOrderStatusError(clientRes.error || t.payments.shippingBlockedUnpaid);
+                          return;
+                        }
+                        try {
+                          const srvRes = await fetch(`/api/admin/orders/${encodeURIComponent(o.id)}/status`, {
+                            method: 'PATCH',
+                            headers: { 'Content-Type': 'application/json' },
+                            credentials: 'include',
+                            body: JSON.stringify({ status: targetStatus }),
+                          });
+                          if (srvRes.status === 409) {
+                            const errData = await srvRes.json().catch(() => ({}));
+                            setOrderStatusError(errData.error || t.payments.shippingBlockedUnpaid);
+                          } else if (srvRes.ok) {
+                            const okData = await srvRes.json().catch(() => ({}));
+                            if (okData?.order) updateOrderInState(okData.order);
+                          }
+                        } catch {
+                          // Order might exist only in local seed data
+                        }
+                      }}
                       className="text-xs py-1 px-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-[#0F172A] font-bold text-[#0F172A] dark:text-white cursor-pointer"
                     >
                       <option value="new">جديد (New)</option>
                       <option value="under_confirmation">قيد التأكيد (Confirmation)</option>
-                      <option value="preparing">قيد التجهيز (Preparing)</option>
-                      <option value="out_for_delivery">خرج للتسليم (Out for delivery)</option>
-                      <option value="delivered">تم التسليم (Delivered)</option>
+                      <option value="preparing" disabled={!shipAllowed}>قيد التجهيز (Preparing)</option>
+                      <option value="out_for_delivery" disabled={!shipAllowed}>خرج للتسليم (Out for delivery)</option>
+                      <option value="delivered" disabled={!shipAllowed}>تم التسليم (Delivered)</option>
                       <option value="cancelled">ملغى (Cancelled)</option>
                     </select>
                   </div>
                 </div>
-              ))
+                );
+              })
             )}
           </div>
         </div>

@@ -182,7 +182,7 @@ export const StorefrontView: React.FC = () => {
                       {/* حاوية الصورة المربعة بنسبة 1:1 وزوايا دائرية ناعمة */}
                       <div className="aspect-square w-full bg-white dark:bg-[#0F172A] rounded-xl overflow-hidden p-2 flex items-center justify-center border border-[#F1F5F9] dark:border-slate-700/60 relative">
                         <img
-                          src={product.images[0] || '/assets/aistudio/file_0000000048188243bc0b721218c854fc_ea3ea21d.png'}
+                          src={product.images[0] || '/assets/images/echox-logo.webp'}
                           alt={prodName}
                           loading="lazy"
                           className="w-full h-full object-contain group-hover:scale-105 transition-transform duration-300"
@@ -283,7 +283,7 @@ export const StorefrontView: React.FC = () => {
                       {/* الصورة المصغرة المربعة بزوايا دائرية ناعمة */}
                       <div className="w-13 h-13 sm:w-14 sm:h-14 rounded-2xl bg-white dark:bg-[#0F172A] border border-[#E2E8F0] dark:border-slate-700/60 p-1 shrink-0 flex items-center justify-center overflow-hidden">
                         <img
-                          src={product.images[0] || '/assets/aistudio/file_0000000048188243bc0b721218c854fc_ea3ea21d.png'}
+                          src={product.images[0] || '/assets/images/echox-logo.webp'}
                           alt={prodName}
                           loading="lazy"
                           className="w-full h-full object-contain group-hover:scale-105 transition-transform"
@@ -366,7 +366,7 @@ export const StorefrontView: React.FC = () => {
                       <div>
                         <div className="aspect-square w-full bg-white dark:bg-[#0F172A] rounded-xl overflow-hidden p-2 flex items-center justify-center border border-[#F1F5F9] dark:border-slate-700/60">
                           <img
-                            src={product.images[0] || '/assets/aistudio/file_0000000048188243bc0b721218c854fc_ea3ea21d.png'}
+                            src={product.images[0] || '/assets/images/echox-logo.webp'}
                             alt={prodName}
                             loading="lazy"
                             className="w-full h-full object-contain group-hover:scale-105 transition-transform duration-300"

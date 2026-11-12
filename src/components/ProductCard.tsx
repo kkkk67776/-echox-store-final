@@ -43,7 +43,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
           className="relative w-full aspect-square bg-white dark:bg-[#0F172A] rounded-2xl overflow-hidden cursor-pointer p-2 flex items-center justify-center border border-[#F1F5F9] dark:border-slate-700/60"
         >
           <img 
-            src={product.images[0] || '/assets/aistudio/file_0000000048188243bc0b721218c854fc_ea3ea21d.png'} 
+            src={product.images[0] || '/assets/images/echox-logo.webp'} 
             alt={prodName}
             loading="lazy"
             referrerPolicy="no-referrer"

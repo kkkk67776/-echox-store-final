@@ -15,8 +15,18 @@ import {
   ChatMessage, 
   Review,
   CategoryItem,
-  PromoBanner
+  PromoBanner,
+  PaymentMethodType,
+  PaymentSystemPublicConfig,
+  TransferProof
 } from '../types';
+import {
+  DEFAULT_PUBLIC_PAYMENT_CONFIG,
+  fetchPublicPaymentConfig,
+  submitServerCheckout,
+  canOrderShipClient,
+  syncAdminCatalogToPaymentEngine
+} from '../lib/payments';
 import { 
   INITIAL_COMPANIES, 
   INITIAL_PRODUCTS, 
@@ -61,6 +71,7 @@ interface StoreContextType {
   cartSubtotal: number;
   cartShippingFee: number;
   cartDiscountAmount: number;
+  cartTaxAmount: number;
   cartTotal: number;
   isCartOpen: boolean;
   setIsCartOpen: (open: boolean) => void;
@@ -106,20 +117,35 @@ interface StoreContextType {
   deleteBanner: (id: string) => void;
   toggleBannerActive: (id: string) => void;
 
-  // Orders
+  // Orders & Payments
+  paymentConfig: PaymentSystemPublicConfig;
+  refreshPaymentConfig: () => Promise<void>;
   orders: Order[];
   createOrder: (orderData: {
     customerName: string;
     customerEmail?: string;
     customerPhone: string;
     shippingAddress: CustomerAddress;
-    paymentMethod: 'cod' | 'konnect' | 'flouci';
+    paymentMethod: PaymentMethodType;
     carrierName?: string;
     notes?: string;
   }) => Order;
+  createServerOrder: (orderData: {
+    customerName: string;
+    customerEmail?: string;
+    customerPhone: string;
+    shippingAddress: CustomerAddress;
+    paymentMethod: PaymentMethodType;
+    carrierName?: string;
+    notes?: string;
+    transferProof?: Partial<TransferProof>;
+  }) => Promise<{ ok: boolean; order?: Order; paymentUrl?: string; error?: string }>;
+  updateOrderInState: (updatedOrder: Order) => void;
   addManualOrder: (orderData: Partial<Order>) => Order;
-  updateOrderStatus: (orderId: string, status: OrderStatus, note?: string) => void;
+  updateOrderStatus: (orderId: string, status: OrderStatus, note?: string) => { ok: boolean; error?: string };
   deleteOrder: (orderId: string) => void;
+  isSupportModalOpen: boolean;
+  setIsSupportModalOpen: (open: boolean) => void;
   
   // Contact & Chat
   inquiries: ContactInquiry[];
@@ -205,12 +231,39 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [isCartOpen, setIsCartOpen] = useState<boolean>(false);
+  const [isSupportModalOpen, setIsSupportModalOpen] = useState<boolean>(false);
+  const [paymentConfig, setPaymentConfig] = useState<PaymentSystemPublicConfig>(DEFAULT_PUBLIC_PAYMENT_CONFIG);
+
+  const refreshPaymentConfig = async () => {
+    try {
+      const cfg = await fetchPublicPaymentConfig();
+      setPaymentConfig(cfg);
+    } catch {
+      // keep safe default
+    }
+  };
+
+  useEffect(() => {
+    refreshPaymentConfig();
+  }, []);
+
+  const normalizeAssetUrl = (url: string): string => {
+    if (!url) return '/assets/images/echox-logo.webp';
+    if (url.includes('file_0000000048188243bc0b721218c854fc_ea3ea21d.png')) return '/assets/images/echox-logo.webp';
+    if (url.includes('product_drill_cordless_pro')) return '/assets/images/product_drill_cordless_pro.webp';
+    if (url.includes('product_automotive_headlight')) return '/assets/images/product_automotive_headlight.webp';
+    if (url.includes('product_digital_multimeter')) return '/assets/images/product_digital_multimeter.webp';
+    if (url.includes('hero_echox_tunisia_store')) return '/assets/images/hero_echox_tunisia_store.webp';
+    return url;
+  };
 
   // 3. Products
   const [products, setProducts] = useState<Product[]>(() => {
     try {
       const saved = localStorage.getItem('echox_products');
-      return saved ? JSON.parse(saved) : INITIAL_PRODUCTS;
+      if (!saved) return INITIAL_PRODUCTS;
+      const parsed: Product[] = JSON.parse(saved);
+      return parsed.map(p => ({ ...p, images: (p.images || []).map(normalizeAssetUrl) }));
     } catch {
       return INITIAL_PRODUCTS;
     }
@@ -228,7 +281,9 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [companies, setCompanies] = useState<Company[]>(() => {
     try {
       const saved = localStorage.getItem('echox_companies');
-      return saved ? JSON.parse(saved) : INITIAL_COMPANIES;
+      if (!saved) return INITIAL_COMPANIES;
+      const parsed: Company[] = JSON.parse(saved);
+      return parsed.map(c => ({ ...c, logo: normalizeAssetUrl(c.logo) }));
     } catch {
       return INITIAL_COMPANIES;
     }
@@ -246,7 +301,12 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [orders, setOrders] = useState<Order[]>(() => {
     try {
       const saved = localStorage.getItem('echox_orders');
-      return saved ? JSON.parse(saved) : INITIAL_ORDERS;
+      if (!saved) return INITIAL_ORDERS;
+      const parsed: Order[] = JSON.parse(saved);
+      return parsed.map(o => ({
+        ...o,
+        items: (o.items || []).map(it => ({ ...it, productImage: normalizeAssetUrl(it.productImage) })),
+      }));
     } catch {
       return INITIAL_ORDERS;
     }
@@ -373,7 +433,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         {
           productId: products[0]?.id || 'prod_1',
           productName: products[0]?.name || { ar: 'طلب هاتفي مباشر', fr: 'Commande directe', en: 'Direct Order' },
-          productImage: products[0]?.images[0] || '/assets/aistudio/file_0000000048188243bc0b721218c854fc_ea3ea21d.png',
+          productImage: products[0]?.images[0] || '/assets/images/echox-logo.webp',
           unitPrice: orderData.totalAmount || 150.000,
           quantity: 1,
           totalPrice: orderData.totalAmount || 150.000
@@ -557,10 +617,12 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const cartSubtotal = cart.reduce((sum, item) => sum + (item.product.price * item.quantity), 0);
   const cartDiscountAmount = cartSubtotal * discountRate;
+  const cartNetItems = Math.max(0, cartSubtotal - cartDiscountAmount);
+  const cartTaxAmount = Math.round(cartNetItems * ((paymentConfig?.taxRatePercent || 0) / 100) * 1000) / 1000;
   const cartShippingFee = cart.length === 0 
     ? 0 
     : (cartSubtotal >= siteSettings.freeShippingThreshold ? 0 : siteSettings.standardShippingFee);
-  const cartTotal = Math.max(0, cartSubtotal - cartDiscountAmount + cartShippingFee);
+  const cartTotal = Math.max(0, Math.round((cartNetItems + cartTaxAmount + cartShippingFee) * 1000) / 1000);
 
   // 8. Wishlist
   const [wishlist, setWishlist] = useState<string[]>(() => {
@@ -711,11 +773,19 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       reviewCount: 0,
       reviews: []
     };
-    setProducts(prev => [newProduct, ...prev]);
+    setProducts(prev => {
+      const next = [newProduct, ...prev];
+      syncAdminCatalogToPaymentEngine(next);
+      return next;
+    });
   };
 
   const updateProduct = (id: string, updates: Partial<Product>) => {
-    setProducts(prev => prev.map(p => p.id === id ? { ...p, ...updates } : p));
+    setProducts(prev => {
+      const next = prev.map(p => p.id === id ? { ...p, ...updates } : p);
+      syncAdminCatalogToPaymentEngine(next);
+      return next;
+    });
   };
 
   const deleteProduct = (id: string) => {
@@ -723,7 +793,11 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   const toggleProductActive = (id: string) => {
-    setProducts(prev => prev.map(p => p.id === id ? { ...p, active: !p.active } : p));
+    setProducts(prev => {
+      const next = prev.map(p => p.id === id ? { ...p, active: !p.active } : p);
+      syncAdminCatalogToPaymentEngine(next);
+      return next;
+    });
   };
 
   const addProductReview = (productId: string, review: Omit<Review, 'id' | 'date'>) => {
@@ -763,12 +837,63 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   // 13. Orders
+  const updateOrderInState = (updatedOrder: Order) => {
+    setOrders(prev => {
+      const exists = prev.some(o => o.id === updatedOrder.id || o.trackingNumber === updatedOrder.trackingNumber);
+      if (!exists) return [updatedOrder, ...prev];
+      return prev.map(o => (o.id === updatedOrder.id || o.trackingNumber === updatedOrder.trackingNumber) ? updatedOrder : o);
+    });
+  };
+
+  const createServerOrder = async (orderData: {
+    customerName: string;
+    customerEmail?: string;
+    customerPhone: string;
+    shippingAddress: CustomerAddress;
+    paymentMethod: PaymentMethodType;
+    carrierName?: string;
+    notes?: string;
+    transferProof?: Partial<TransferProof>;
+  }): Promise<{ ok: boolean; order?: Order; paymentUrl?: string; error?: string }> => {
+    const payload = {
+      customerId: currentUser?.id,
+      customerName: orderData.customerName,
+      customerEmail: orderData.customerEmail,
+      customerPhone: orderData.customerPhone,
+      shippingAddress: orderData.shippingAddress,
+      items: cart.map(item => ({
+        productId: item.product.id,
+        productName: item.product.name,
+        productImage: item.product.images[0] || '',
+        unitPrice: item.product.price,
+        quantity: item.quantity,
+        companyId: item.product.companyId,
+        companyName: item.product.companyName,
+      })),
+      couponCode: couponCode || undefined,
+      paymentMethod: orderData.paymentMethod,
+      clientExpectedTotal: cartTotal,
+      carrierName: orderData.carrierName || 'Aramex Express Tunisie',
+      notes: orderData.notes,
+      transferProof: orderData.transferProof,
+    };
+
+    const res = await submitServerCheckout(payload);
+    if (!res.ok || !res.order) {
+      return { ok: false, error: res.error || 'تعذر تسجيل الطلب على الخادم.' };
+    }
+
+    setOrders(prev => [res.order!, ...prev]);
+    clearCart();
+    return { ok: true, order: res.order, paymentUrl: res.paymentUrl };
+  };
+
   const createOrder = (orderData: {
     customerName: string;
     customerEmail?: string;
     customerPhone: string;
     shippingAddress: CustomerAddress;
-    paymentMethod: 'cod' | 'konnect' | 'flouci';
+    paymentMethod: PaymentMethodType;
     carrierName?: string;
     notes?: string;
   }): Order => {
@@ -780,10 +905,19 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       productId: item.product.id,
       productName: item.product.name,
       productImage: item.product.images[0] || '',
+      companyId: item.product.companyId,
+      companyName: item.product.companyName,
       unitPrice: item.product.price,
       quantity: item.quantity,
       totalPrice: item.product.price * item.quantity
     }));
+
+    const initialPayStatus =
+      orderData.paymentMethod === 'bank_transfer'
+        ? 'Awaiting Bank Transfer'
+        : orderData.paymentMethod === 'cod'
+        ? 'Cash on Delivery'
+        : 'Pending Payment';
 
     const newOrder: Order = {
       id: `ord_${Date.now()}`,
@@ -796,11 +930,12 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       items: orderItems,
       subtotal: cartSubtotal,
       discount: cartDiscountAmount,
+      taxAmount: cartTaxAmount,
       shippingFee: cartShippingFee,
       totalAmount: cartTotal,
       status: 'new',
       paymentMethod: orderData.paymentMethod,
-      paymentStatus: orderData.paymentMethod === 'cod' ? 'pending' : 'pending',
+      paymentStatus: initialPayStatus,
       carrierName: orderData.carrierName || 'Aramex Express Tunisie',
       createdAt: now,
       updatedAt: now,
@@ -819,7 +954,13 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return newOrder;
   };
 
-  const updateOrderStatus = (orderId: string, status: OrderStatus, note?: string) => {
+  const updateOrderStatus = (orderId: string, status: OrderStatus, note?: string): { ok: boolean; error?: string } => {
+    const targetOrder = orders.find(o => o.id === orderId);
+    const shippingSteps: OrderStatus[] = ['preparing', 'out_for_delivery', 'delivered'];
+    if (targetOrder && shippingSteps.includes(status) && !canOrderShipClient(targetOrder)) {
+      return { ok: false, error: t.payments.shippingBlockedUnpaid };
+    }
+
     const now = new Date().toISOString();
     setOrders(prev => prev.map(o => {
       if (o.id !== orderId) return o;
@@ -834,6 +975,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         ]
       };
     }));
+    return { ok: true };
   };
 
   // 14. Inquiries & Chat
@@ -947,6 +1089,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       cartSubtotal,
       cartShippingFee,
       cartDiscountAmount,
+      cartTaxAmount,
       cartTotal,
       isCartOpen,
       setIsCartOpen,
@@ -985,11 +1128,17 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       deleteBanner,
       toggleBannerActive,
       
+      paymentConfig,
+      refreshPaymentConfig,
       orders,
       createOrder,
+      createServerOrder,
+      updateOrderInState,
       addManualOrder,
       updateOrderStatus,
       deleteOrder,
+      isSupportModalOpen,
+      setIsSupportModalOpen,
       
       inquiries,
       sendInquiry,

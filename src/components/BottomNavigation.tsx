@@ -275,7 +275,7 @@ export const BottomNavigation: React.FC<BottomNavigationProps> = ({ onOpenVault 
                       <div className="flex items-center gap-3 min-w-0">
                         <div className="w-12 h-12 rounded-xl bg-white dark:bg-[#0F172A] border border-[#E2E8F0] dark:border-slate-700/60 p-1 shrink-0 flex items-center justify-center overflow-hidden">
                           <img
-                            src={product.images[0] || '/assets/aistudio/file_0000000048188243bc0b721218c854fc_ea3ea21d.png'}
+                            src={product.images[0] || '/assets/images/echox-logo.webp'}
                             alt={prodName}
                             className="w-full h-full object-contain"
                           />

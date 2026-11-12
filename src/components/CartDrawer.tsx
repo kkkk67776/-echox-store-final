@@ -29,10 +29,12 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({ onOpenCheckout }) => {
     cartSubtotal, 
     cartShippingFee, 
     cartDiscountAmount, 
+    cartTaxAmount,
     cartTotal,
     couponCode,
     applyCoupon,
-    siteSettings
+    siteSettings,
+    paymentConfig
   } = useStore();
 
   const [inputCoupon, setInputCoupon] = useState('');
@@ -123,7 +125,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({ onOpenCheckout }) => {
             cart.map(item => (
               <div key={item.product.id} className="py-3.5 flex items-center gap-3">
                 <img 
-                  src={item.product.images[0] || '/assets/aistudio/file_0000000048188243bc0b721218c854fc_ea3ea21d.png'} 
+                  src={item.product.images[0] || '/assets/images/echox-logo.webp'} 
                   alt={item.product.name[language]}
                   referrerPolicy="no-referrer"
                   className="w-16 h-16 rounded-xl object-cover bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shrink-0"
@@ -216,6 +218,12 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({ onOpenCheckout }) => {
                 <div className="flex justify-between text-emerald-700 dark:text-emerald-400 font-bold">
                   <span>{t.cart.discount}</span>
                   <span className="tabular-nums">-{cartDiscountAmount.toFixed(3)} {t.cart.currency}</span>
+                </div>
+              )}
+              {cartTaxAmount > 0 && (
+                <div className="flex justify-between">
+                  <span>{t.payments.tax} ({paymentConfig.taxRatePercent}%)</span>
+                  <span className="font-bold text-slate-900 dark:text-white tabular-nums">{cartTaxAmount.toFixed(3)} {t.cart.currency}</span>
                 </div>
               )}
               <div className="flex justify-between">

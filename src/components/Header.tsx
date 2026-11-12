@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Menu, X, Search, ShoppingBag, Heart, Phone, Bell, CheckCircle2, Sparkles, Sun, Moon } from 'lucide-react';
+import { Menu, X, Search, ShoppingBag, Heart, Phone, Bell, CheckCircle2, Sparkles, Sun, Moon, HeartHandshake } from 'lucide-react';
 import { useStore } from '../context/StoreContext';
 import { Product } from '../types';
 import { verifyAccessCodeServer } from '../lib/security';
@@ -29,7 +29,8 @@ export default function Header({ onOpenVault, productsList, onSelectProduct }: H
     setSearchQuery,
     isDarkMode,
     toggleDarkMode,
-    categories
+    categories,
+    setIsSupportModalOpen
   } = useStore();
 
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -159,7 +160,7 @@ export default function Header({ onOpenVault, productsList, onSelectProduct }: H
             className="flex items-center gap-2 cursor-pointer group"
           >
             <img 
-              src="/assets/aistudio/file_0000000048188243bc0b721218c854fc_ea3ea21d.png" 
+              src="/assets/images/echox-logo.webp" 
               alt="ECHOX Store" 
               className="w-8 h-8 rounded-full object-contain border border-[#FF6B00]/30 group-hover:scale-105 transition-transform"
             />
@@ -289,7 +290,7 @@ export default function Header({ onOpenVault, productsList, onSelectProduct }: H
               <div className="flex items-center justify-between mb-6 pb-4 border-b border-[#E2E8F0] dark:border-slate-800">
                 <div className="flex items-center gap-2">
                   <img 
-                    src="/assets/aistudio/file_0000000048188243bc0b721218c854fc_ea3ea21d.png" 
+                    src="/assets/images/echox-logo.webp" 
                     alt="ECHOX Store" 
                     className="w-7 h-7 rounded-full object-contain border border-[#FF6B00]/30"
                   />
@@ -348,6 +349,17 @@ export default function Header({ onOpenVault, productsList, onSelectProduct }: H
                   className="w-full text-start block p-2.5 rounded-2xl hover:bg-[#F8FAFC] dark:hover:bg-slate-800 hover:text-[#FF6B00] transition-colors cursor-pointer"
                 >
                   {language === 'ar' ? 'اتصل بنا' : language === 'fr' ? 'Contactez-nous' : 'Contact Us'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsMenuOpen(false);
+                    setIsSupportModalOpen(true);
+                  }}
+                  className="w-full text-start flex items-center gap-2 p-2.5 rounded-2xl bg-[#FF6B00]/10 text-[#FF6B00] hover:bg-[#FF6B00]/20 transition-colors cursor-pointer mt-2"
+                >
+                  <HeartHandshake className="w-4 h-4 shrink-0" />
+                  <span>{t.supportEchox.navLabel}</span>
                 </button>
               </div>
             </div>

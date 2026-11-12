@@ -75,13 +75,55 @@ export interface CartItem {
   quantity: number;
 }
 
+export type PaymentMethodType = 'cod' | 'bank_transfer' | 'online_payment' | 'konnect' | 'flouci';
+
+export type PaymentStatus =
+  | 'Pending Payment'
+  | 'Awaiting Bank Transfer'
+  | 'Payment Verification'
+  | 'Paid'
+  | 'Payment Failed'
+  | 'Cancelled'
+  | 'Refunded'
+  | 'Cash on Delivery'
+  | 'pending'
+  | 'paid'
+  | 'failed';
+
+export interface TransferProof {
+  referenceNumber: string;
+  senderName: string;
+  transferDate: string;
+  receiptImageDataUrl?: string; // base64/data URL or URL
+  notes?: string;
+  submittedAt: string;
+}
+
 export interface OrderItem {
   productId: string;
   productName: MultilingualText;
   productImage: string;
+  companyId?: string;
+  companyName?: string;
   unitPrice: number;
   quantity: number;
   totalPrice: number;
+}
+
+export interface VendorSubOrder {
+  subOrderId: string;
+  masterOrderId: string;
+  trackingNumber: string;
+  vendorId: string;
+  vendorName: string;
+  items: OrderItem[];
+  grossAmount: number;
+  commissionRate: number;
+  commissionAmount: number;
+  netVendorAmount: number;
+  payoutStatus: 'pending' | 'eligible' | 'settled' | 'reversed';
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface Order {
@@ -95,11 +137,19 @@ export interface Order {
   items: OrderItem[];
   subtotal: number;
   discount: number;
+  taxAmount?: number;
   shippingFee: number;
   totalAmount: number;
+  platformCommissionTotal?: number;
+  currency?: string;
   status: OrderStatus;
-  paymentMethod: 'cod' | 'konnect' | 'flouci';
-  paymentStatus: 'pending' | 'paid' | 'failed';
+  paymentMethod: PaymentMethodType;
+  paymentStatus: PaymentStatus;
+  paymentReference?: string; // Unique reference per order e.g. ECH-REF-XXXXXX
+  transferProof?: TransferProof;
+  subOrders?: VendorSubOrder[];
+  transactionId?: string;
+  refundReason?: string;
   carrierName: string;
   createdAt: string;
   updatedAt: string;
@@ -109,6 +159,128 @@ export interface Order {
     timestamp: string;
     note?: string;
   }[];
+}
+
+export interface BankTransferPublicConfig {
+  enabled: boolean;
+  accountHolder: string;
+  bankName: string;
+  ibanOrRib: string;
+  swiftCode?: string;
+  instructions: MultilingualText;
+}
+
+export interface OnlineGatewayPublicConfig {
+  enabled: boolean;
+  provider: 'konnect' | 'flouci' | 'stripe_custom';
+  mode: 'sandbox' | 'live';
+  hasApiKey: boolean;
+  hasWalletId: boolean;
+  hasWebhookSecret: boolean;
+  apiKeyMasked?: string;
+  walletIdMasked?: string;
+  readyForLive: boolean;
+  lastConnectionCheck?: {
+    checkedAt: string;
+    ok: boolean;
+    message: string;
+  };
+}
+
+export interface PaymentSystemPublicConfig {
+  currency: 'TND' | 'EUR' | 'USD';
+  commissionRatePercent: number;
+  taxRatePercent: number;
+  methods: {
+    cod: { enabled: boolean };
+    bank_transfer: BankTransferPublicConfig;
+    online_payment: OnlineGatewayPublicConfig;
+  };
+  updatedAt: string;
+}
+
+export interface PaymentTransaction {
+  id: string;
+  orderId: string;
+  trackingNumber: string;
+  paymentReference: string;
+  customerName: string;
+  customerPhone: string;
+  method: 'cod' | 'bank_transfer' | 'online_payment';
+  provider?: string;
+  externalPaymentId?: string;
+  amount: number;
+  currency: string;
+  taxAmount: number;
+  commissionTotal: number;
+  status: PaymentStatus;
+  transferProof?: TransferProof;
+  failureReason?: string;
+  refundAmount?: number;
+  refundReason?: string;
+  verifiedByAdmin?: string;
+  verifiedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface VendorLedgerEntry {
+  id: string;
+  vendorId: string;
+  vendorName: string;
+  orderId: string;
+  subOrderId: string;
+  trackingNumber: string;
+  grossAmount: number;
+  commissionAmount: number;
+  netAmount: number;
+  paymentStatus: PaymentStatus;
+  payoutStatus: 'pending' | 'eligible' | 'settled' | 'reversed';
+  settledAt?: string;
+  settlementNote?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RefundRequest {
+  id: string;
+  orderId: string;
+  trackingNumber: string;
+  transactionId?: string;
+  customerName: string;
+  customerPhone: string;
+  amount: number;
+  reason: string;
+  status: 'requested' | 'approved' | 'rejected' | 'processed';
+  adminNote?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SupportTransaction {
+  id: string;
+  supportReference: string;
+  supporterName: string;
+  supporterEmail?: string;
+  supporterPhone?: string;
+  note?: string;
+  amount: number;
+  currency: string;
+  method: 'cod' | 'bank_transfer' | 'online_payment';
+  status: PaymentStatus;
+  transferProof?: TransferProof;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface FinancialActivityLog {
+  id: string;
+  action: string;
+  actor: 'system' | 'admin' | 'customer' | 'webhook' | 'vendor';
+  targetId?: string;
+  details: string;
+  amount?: number;
+  timestamp: string;
 }
 
 export interface CustomerUser {
@@ -167,6 +339,7 @@ export interface SiteSettings {
   standardShippingFee: number; // e.g. 7.000 TND
   freeShippingThreshold: number; // e.g. 150.000 TND
   enableCOD: boolean;
+  enableBankTransfer?: boolean;
   enableKonnect: boolean;
   enableFlouci: boolean;
   announcementText: MultilingualText;

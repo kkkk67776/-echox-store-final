@@ -39,6 +39,7 @@ export const ProductDetailModal: React.FC = () => {
   const [reviewRating, setReviewRating] = useState(5);
   const [reviewComment, setReviewComment] = useState('');
   const [showReviewSuccess, setShowReviewSuccess] = useState(false);
+  const [shareCopied, setShareCopied] = useState(false);
 
   if (!product) return null;
 
@@ -235,10 +236,33 @@ export const ProductDetailModal: React.FC = () => {
                   {/* Wishlist Button */}
                   <button
                     onClick={() => toggleWishlist(product.id)}
-                    className="p-2.5 rounded-xl border border-slate-200 text-slate-600 hover:text-red-500 transition-colors"
+                    className="p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:text-red-500 transition-colors cursor-pointer"
                     aria-label="Wishlist"
                   >
                     <Heart className={`w-5 h-5 ${isWishlisted ? 'fill-red-500 text-red-500' : ''}`} />
+                  </button>
+
+                  {/* Share Clean SEO Product URL Button */}
+                  <button
+                    onClick={async () => {
+                      const shareUrl = `${window.location.origin}/?product=${encodeURIComponent(product.id)}`;
+                      try {
+                        if (navigator.share) {
+                          await navigator.share({ title: product.name[language], url: shareUrl });
+                        } else if (navigator.clipboard) {
+                          await navigator.clipboard.writeText(shareUrl);
+                        }
+                      } catch {
+                        // User canceled or clipboard fallback
+                      }
+                      setShareCopied(true);
+                      setTimeout(() => setShareCopied(false), 2000);
+                    }}
+                    className="px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:text-[#FF6B00] hover:border-[#FF6B00] transition-colors flex items-center gap-1.5 text-xs font-bold cursor-pointer"
+                    aria-label="Share product link"
+                  >
+                    <Share2 className="w-4 h-4" />
+                    <span>{shareCopied ? (language === 'ar' ? 'تم النسخ' : language === 'fr' ? 'Copié' : 'Copied') : (language === 'ar' ? 'مشاركة' : language === 'fr' ? 'Partager' : 'Share')}</span>
                   </button>
                 </div>
 
