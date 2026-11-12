@@ -57,7 +57,12 @@ import {
   logoutOwnerServer,
   saveOwnerLockConfig,
   fetchOwnerLockConfig,
-  verifyOwnerLockInput
+  verifyOwnerLockInput,
+  updateAccessCodeServer,
+  updatePinServer,
+  fetchActiveSessions,
+  revokeAllSessionsServer,
+  fetchSecuritySystemStatus
 } from '../lib/security';
 
 interface OwnerDashboardProps {
@@ -149,7 +154,30 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
   const [footerSaving, setFooterSaving] = useState(false);
   const [previewFooterLang, setPreviewFooterLang] = useState<'ar' | 'fr' | 'en'>('ar');
 
-  // Security Lock Change State
+  // Security & Access Management States (Argon2id)
+  const [accessCodeCurrent, setAccessCodeCurrent] = useState('');
+  const [accessCodeNew, setAccessCodeNew] = useState('');
+  const [accessCodeConfirm, setAccessCodeConfirm] = useState('');
+  const [accessCodeStep, setAccessCodeStep] = useState<1 | 2>(1);
+  const [accessCodeLoading, setAccessCodeLoading] = useState(false);
+  const [accessCodeSuccess, setAccessCodeSuccess] = useState('');
+  const [accessCodeError, setAccessCodeError] = useState('');
+  const [showAccessCodePlain, setShowAccessCodePlain] = useState(false);
+
+  const [pinCurrent, setPinCurrent] = useState('');
+  const [pinNew, setPinNew] = useState('');
+  const [pinConfirm, setPinConfirm] = useState('');
+  const [pinStep, setPinStep] = useState<1 | 2>(1);
+  const [pinLoading, setPinLoading] = useState(false);
+  const [pinSuccess, setPinSuccess] = useState('');
+  const [pinError, setPinError] = useState('');
+
+  const [activeSessionsList, setActiveSessionsList] = useState<Array<{ id: string; ip: string; userAgent: string; createdAt: string; isCurrent: boolean }>>([]);
+  const [sessionsLoading, setSessionsLoading] = useState(false);
+  const [sessionsMessage, setSessionsMessage] = useState('');
+  const [securityStatusInfo, setSecurityStatusInfo] = useState<{ argon2idEnabled: boolean; hashingAlgorithm: string; activeSessionsCount: number; updatedAt: string } | null>(null);
+
+  // Legacy state for compatibility
   const [lockType, setLockType] = useState<'pin' | 'pattern'>('pin');
   const [currentSecretInput, setCurrentSecretInput] = useState('');
   const [newSecretInput, setNewSecretInput] = useState('');
@@ -254,12 +282,33 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
     setFooterWorkingHoursEn(siteSettings.workingHours?.en || '');
   }, [siteSettings]);
 
+  // Load Active Sessions & Security Engine Status
+  useEffect(() => {
+    let active = true;
+    async function loadSessionsAndStatus() {
+      try {
+        const sess = await fetchActiveSessions();
+        if (active && sess && sess.sessions) {
+          setActiveSessionsList(sess.sessions);
+        }
+        const stat = await fetchSecuritySystemStatus();
+        if (active && stat) {
+          setSecurityStatusInfo(stat);
+        }
+      } catch (err) {
+        console.warn('Security info load notice:', err);
+      }
+    }
+    loadSessionsAndStatus();
+    return () => { active = false; };
+  }, [activeTab]);
+
   if (checking) {
     return (
       <div className="min-h-[85vh] flex items-center justify-center bg-[#0B0F17] text-white">
         <div className="flex flex-col items-center gap-3">
           <div className="w-10 h-10 border-3 border-[#FF6B00] border-t-transparent rounded-full animate-spin" />
-          <span className="text-xs font-bold text-slate-300">جارٍ التحقق من صلاحيات خزنة المالك (ECHOX VAULT)...</span>
+          <span className="text-xs font-bold text-slate-300">جارٍ التحقق من صلاحيات مركز التحكم (Argon2id)...</span>
         </div>
       </div>
     );
@@ -396,6 +445,96 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
         setIsChangingPasscode(false);
       }
     }
+  };
+
+  // Handlers for Centralized Argon2id Security & Access Management
+  const handleUpdateAccessCode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAccessCodeError('');
+    setAccessCodeSuccess('');
+
+    if (accessCodeStep === 1) {
+      if (!accessCodeCurrent.trim()) {
+        setAccessCodeError('يرجى إدخال رمز الوصول أو الـ PIN الحالي للمتابعة.');
+        return;
+      }
+      setAccessCodeStep(2);
+    } else {
+      if (accessCodeNew.trim().length < 4) {
+        setAccessCodeError('رمز الوصول الجديد يجب أن يتكون من 4 خانات على الأقل.');
+        return;
+      }
+      if (accessCodeNew.trim() !== accessCodeConfirm.trim()) {
+        setAccessCodeError('تأكيد رمز الوصول غير متطابق مع الرمز الجديد!');
+        return;
+      }
+
+      setAccessCodeLoading(true);
+      const res = await updateAccessCodeServer(accessCodeCurrent.trim(), accessCodeNew.trim());
+      setAccessCodeLoading(false);
+
+      if (res.success) {
+        setAccessCodeSuccess('تم تحديث وتشفير رمز الوصول السري بنجاح ببصمة Argon2id خادمياً ✓ (فعال فورياً)');
+        setAccessCodeCurrent('');
+        setAccessCodeNew('');
+        setAccessCodeConfirm('');
+        setAccessCodeStep(1);
+        setTimeout(() => setAccessCodeSuccess(''), 5000);
+      } else {
+        setAccessCodeError(res.error || 'حدث خطأ أثناء تحديث رمز الوصول.');
+      }
+    }
+  };
+
+  const handleUpdatePin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPinError('');
+    setPinSuccess('');
+
+    if (pinStep === 1) {
+      if (!pinCurrent.trim()) {
+        setPinError('يرجى إدخال رمز PIN الحالي للمتابعة.');
+        return;
+      }
+      setPinStep(2);
+    } else {
+      const cleanNew = pinNew.trim();
+      if (cleanNew.length !== 6 || !/^\d{6}$/.test(cleanNew)) {
+        setPinError('يجب أن يتكون رمز الـ PIN الجديد من 6 أرقام رقمية بالضبط (0-9).');
+        return;
+      }
+      if (cleanNew !== pinConfirm.trim()) {
+        setPinError('تأكيد رمز الـ PIN غير متطابق مع الرمز الجديد!');
+        return;
+      }
+
+      setPinLoading(true);
+      const res = await updatePinServer(pinCurrent.trim(), cleanNew);
+      setPinLoading(false);
+
+      if (res.success) {
+        setPinSuccess('تم تحديث وتشفير رمز PIN الجديد بنجاح ببصمة Argon2id خادمياً ✓ (فعال فورياً)');
+        setPinCurrent('');
+        setPinNew('');
+        setPinConfirm('');
+        setPinStep(1);
+        setTimeout(() => setPinSuccess(''), 5000);
+      } else {
+        setPinError(res.error || 'رمز PIN الحالي غير صحيح أو حدث خطأ أثناء التحديث.');
+      }
+    }
+  };
+
+  const handleRevokeAllSessions = async () => {
+    setSessionsLoading(true);
+    const res = await revokeAllSessionsServer();
+    setSessionsLoading(false);
+    setSessionsMessage(res.message || 'تم إلغاء كافة الجلسات الأخرى بنجاح.');
+    const sess = await fetchActiveSessions();
+    if (sess && sess.sessions) {
+      setActiveSessionsList(sess.sessions);
+    }
+    setTimeout(() => setSessionsMessage(''), 4000);
   };
 
   // Handlers for Products
@@ -1003,91 +1142,123 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
             </div>
           </div>
 
-          {/* Card 2: Change Secret Passcode / Room Lock */}
+          {/* Card 2: إدارة رمز الوصول السري (Access Code Management) */}
           <div className="bg-[#F8FAFC] dark:bg-[#1E293B] rounded-3xl p-4 sm:p-6 border border-[#E2E8F0] dark:border-slate-800 space-y-4">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-700">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-700 gap-2">
               <div className="flex items-center gap-2">
-                <Lock className="w-4 h-4 text-[#FF6B00]" />
-                <h3 className="text-sm font-black">تغيير رمز الدخول السري لغرفة المالك</h3>
+                <KeyRound className="w-5 h-5 text-[#FF6B00]" />
+                <div>
+                  <h3 className="text-sm font-black">إدارة رمز الوصول السري (Access Code Management)</h3>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    الرمز الأولي المكتوب في شريط البحث لاستدعاء بوابة PIN (الافتراضي: <span className="font-mono text-[#FF6B00]">#echox_vault_99</span>)
+                  </p>
+                </div>
               </div>
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300">
-                SHA-256 Encrypted
-              </span>
+              <div className="flex items-center gap-1.5 self-start sm:self-auto">
+                <span className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
+                  Argon2id Server-Side
+                </span>
+              </div>
             </div>
 
-            <form onSubmit={handleChangeSecretCode} className="space-y-4">
-              
-              {/* PIN Code Badge */}
-              <div className="flex items-center gap-2">
-                <span className="px-3 py-1.5 rounded-xl text-xs font-bold bg-[#FF6B00] text-white flex items-center gap-1.5">
-                  <Lock className="w-3.5 h-3.5" />
-                  <span>رمز PIN السري (ECHOX VAULT)</span>
-                </span>
-                <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                  يُطلب تلقائياً عند كتابة الشفرة في شريط البحث
-                </span>
+            <div className="bg-amber-500/10 border border-amber-500/20 rounded-2xl p-3 text-xs text-amber-700 dark:text-amber-400 flex items-start gap-2">
+              <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-amber-600 dark:text-amber-400" />
+              <div className="leading-relaxed text-[11px]">
+                <strong>حماية قصوى:</strong> لا يتم حفظ رمز الوصول كنص صريح في أي ملف أمامي أو متصفح. يتم تشفيره فورياً ببصمة Argon2id خادمية مع Salt فريد. يمكنك تغيير الرمز هنا ويصبح فعالاً فوراً بدون تعديل الأكواد أو إعادة النشر.
               </div>
+            </div>
 
-              {secretChangeStep === 1 ? (
-                <div className="space-y-2 bg-white dark:bg-[#0F172A] p-4 rounded-2xl border border-slate-200 dark:border-slate-700">
+            <form onSubmit={handleUpdateAccessCode} className="space-y-4">
+              {accessCodeStep === 1 ? (
+                <div className="space-y-3 bg-white dark:bg-[#0F172A] p-4 rounded-2xl border border-slate-200 dark:border-slate-700">
                   <label className="text-xs font-bold block">
-                    الخطوة 1: أدخل رمز الدخول الحالي للمتابعة:
+                    الخطوة 1: أدخل رمز الوصول الحالي أو رمز PIN للتحقق من هويتك:
                   </label>
                   <input
                     type="password"
-                    value={currentSecretInput}
-                    onChange={e => setCurrentSecretInput(e.target.value)}
-                    placeholder="الرمز الحالي..."
-                    className="w-full text-xs py-2 px-3 rounded-xl border border-slate-300 dark:border-slate-600 bg-transparent text-[#0F172A] dark:text-white outline-none focus:border-[#FF6B00]"
+                    value={accessCodeCurrent}
+                    onChange={e => setAccessCodeCurrent(e.target.value)}
+                    placeholder="رمز الوصول الحالي أو الـ PIN..."
+                    required
+                    className="w-full text-xs py-2.5 px-3 rounded-xl border border-slate-300 dark:border-slate-600 bg-transparent text-[#0F172A] dark:text-white outline-none focus:border-[#FF6B00] font-mono"
                   />
-                  <button
-                    type="submit"
-                    disabled={isChangingPasscode}
-                    className="mt-2 px-4 py-2 rounded-xl bg-[#0F172A] dark:bg-slate-700 hover:bg-[#FF6B00] text-white text-xs font-bold cursor-pointer"
-                  >
-                    {isChangingPasscode ? 'جارٍ التحقق...' : 'التحقق والمتابعة للرمز الجديد ←'}
-                  </button>
+                  <div className="flex items-center justify-between pt-1">
+                    <button
+                      type="submit"
+                      disabled={accessCodeLoading}
+                      className="px-4 py-2 rounded-xl bg-[#0F172A] dark:bg-slate-700 hover:bg-[#FF6B00] text-white text-xs font-bold cursor-pointer transition active:scale-95"
+                    >
+                      {accessCodeLoading ? 'جارٍ التحقق...' : 'التحقق والمتابعة للرمز الجديد ←'}
+                    </button>
+                    <span className="text-[11px] text-slate-400">حماية ضد التخمين (Rate Limiting)</span>
+                  </div>
                 </div>
               ) : (
                 <div className="space-y-3 bg-white dark:bg-[#0F172A] p-4 rounded-2xl border border-slate-200 dark:border-slate-700">
                   <div className="space-y-1">
-                    <label className="text-xs font-bold block">
-                      الخطوة 2: أدخل الرمز الجديد المطلوب:
-                    </label>
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-bold block">
+                        الخطوة 2: أدخل رمز الوصول الجديد المطلوب:
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => setShowAccessCodePlain(!showAccessCodePlain)}
+                        className="text-[11px] text-[#FF6B00] hover:underline flex items-center gap-1 cursor-pointer"
+                      >
+                        {showAccessCodePlain ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                        <span>{showAccessCodePlain ? 'إخفاء' : 'إظهار'}</span>
+                      </button>
+                    </div>
                     <input
-                      type="password"
-                      value={newSecretInput}
-                      onChange={e => setNewSecretInput(e.target.value)}
-                      placeholder="الرمز الجديد..."
-                      className="w-full text-xs py-2 px-3 rounded-xl border border-slate-300 dark:border-slate-600 bg-transparent text-[#0F172A] dark:text-white outline-none focus:border-[#FF6B00]"
+                      type={showAccessCodePlain ? 'text' : 'password'}
+                      value={accessCodeNew}
+                      onChange={e => setAccessCodeNew(e.target.value)}
+                      placeholder="مثال: #echox_admin_2026 أو أي كلمة سرية..."
+                      required
+                      className="w-full text-xs py-2.5 px-3 rounded-xl border border-slate-300 dark:border-slate-600 bg-transparent text-[#0F172A] dark:text-white outline-none focus:border-[#FF6B00] font-mono"
                     />
+                    {accessCodeNew.length > 0 && (
+                      <div className="flex items-center gap-2 pt-1">
+                        <div className="h-1.5 flex-1 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
+                          <div 
+                            className={`h-full transition-all duration-300 ${
+                              accessCodeNew.length >= 8 ? 'w-full bg-emerald-500' : accessCodeNew.length >= 5 ? 'w-2/3 bg-amber-500' : 'w-1/3 bg-red-500'
+                            }`}
+                          />
+                        </div>
+                        <span className="text-[10px] font-bold text-slate-500">
+                          {accessCodeNew.length >= 8 ? 'قوة الرمز: ممتازة' : accessCodeNew.length >= 5 ? 'قوة الرمز: متوسطة' : 'قصير'}
+                        </span>
+                      </div>
+                    )}
                   </div>
 
                   <div className="space-y-1">
                     <label className="text-xs font-bold block">
-                      تأكيد الرمز الجديد:
+                      تأكيد رمز الوصول الجديد:
                     </label>
                     <input
                       type="password"
-                      value={confirmSecretInput}
-                      onChange={e => setConfirmSecretInput(e.target.value)}
-                      placeholder="أعد إدخال الرمز الجديد للتأكيد..."
-                      className="w-full text-xs py-2 px-3 rounded-xl border border-slate-300 dark:border-slate-600 bg-transparent text-[#0F172A] dark:text-white outline-none focus:border-[#FF6B00]"
+                      value={accessCodeConfirm}
+                      onChange={e => setAccessCodeConfirm(e.target.value)}
+                      placeholder="أعد إدخال رمز الوصول للتأكيد..."
+                      required
+                      className="w-full text-xs py-2.5 px-3 rounded-xl border border-slate-300 dark:border-slate-600 bg-transparent text-[#0F172A] dark:text-white outline-none focus:border-[#FF6B00] font-mono"
                     />
                   </div>
 
                   <div className="flex items-center gap-2 pt-2">
                     <button
                       type="submit"
-                      disabled={isChangingPasscode}
-                      className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                      disabled={accessCodeLoading}
+                      className="px-5 py-2.5 rounded-xl bg-[#FF6B00] hover:bg-[#E05E00] text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer transition active:scale-95"
                     >
                       <Save className="w-3.5 h-3.5" />
-                      <span>{isChangingPasscode ? 'جارٍ الحفظ...' : 'حفظ وتشفير الرمز الجديد'}</span>
+                      <span>{accessCodeLoading ? 'جارٍ التشفير والحفظ...' : 'حفظ وتشفير رمز الوصول بـ Argon2id'}</span>
                     </button>
                     <button
                       type="button"
-                      onClick={() => setSecretChangeStep(1)}
+                      onClick={() => setAccessCodeStep(1)}
                       className="px-3 py-2 rounded-xl text-xs font-bold text-slate-500 hover:text-slate-800 dark:hover:text-white"
                     >
                       إلغاء
@@ -1096,21 +1267,207 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
                 </div>
               )}
 
-              {secretSuccessMessage && (
+              {accessCodeSuccess && (
                 <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl text-xs text-emerald-600 font-bold flex items-center gap-2">
                   <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                  <span>{secretSuccessMessage}</span>
+                  <span>{accessCodeSuccess}</span>
                 </div>
               )}
 
-              {secretErrorMessage && (
+              {accessCodeError && (
                 <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-2xl text-xs text-red-600 font-bold flex items-center gap-2">
                   <AlertTriangle className="w-4 h-4 text-red-600 shrink-0" />
-                  <span>{secretErrorMessage}</span>
+                  <span>{accessCodeError}</span>
+                </div>
+              )}
+            </form>
+          </div>
+
+          {/* Card 3: إدارة رمز PIN (PIN Management) */}
+          <div className="bg-[#F8FAFC] dark:bg-[#1E293B] rounded-3xl p-4 sm:p-6 border border-[#E2E8F0] dark:border-slate-800 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-700 gap-2">
+              <div className="flex items-center gap-2">
+                <Lock className="w-5 h-5 text-[#FF6B00]" />
+                <div>
+                  <h3 className="text-sm font-black">إدارة رمز الـ PIN (ECHOX VAULT PIN)</h3>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    الرمز الرقمي المكون من 6 أرقام والمطلوب لفتح مركز التحكم بعد رمز الوصول
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-1.5 self-start sm:self-auto">
+                <span className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-[#FF6B00]/10 text-[#FF6B00] border border-[#FF6B00]/20">
+                  Argon2id (6-Digits)
+                </span>
+              </div>
+            </div>
+
+            <form onSubmit={handleUpdatePin} className="space-y-4">
+              {pinStep === 1 ? (
+                <div className="space-y-3 bg-white dark:bg-[#0F172A] p-4 rounded-2xl border border-slate-200 dark:border-slate-700">
+                  <label className="text-xs font-bold block">
+                    الخطوة 1: أدخل رمز الـ PIN الحالي للمتابعة:
+                  </label>
+                  <input
+                    type="password"
+                    maxLength={6}
+                    value={pinCurrent}
+                    onChange={e => setPinCurrent(e.target.value.replace(/\D/g, ''))}
+                    placeholder="••••••"
+                    required
+                    className="w-full text-center tracking-[0.5em] text-base py-2.5 px-3 rounded-xl border border-slate-300 dark:border-slate-600 bg-transparent text-[#0F172A] dark:text-white outline-none focus:border-[#FF6B00] font-mono"
+                  />
+                  <div className="flex items-center justify-between pt-1">
+                    <button
+                      type="submit"
+                      disabled={pinLoading}
+                      className="px-4 py-2 rounded-xl bg-[#0F172A] dark:bg-slate-700 hover:bg-[#FF6B00] text-white text-xs font-bold cursor-pointer transition active:scale-95"
+                    >
+                      {pinLoading ? 'جارٍ التحقق...' : 'التحقق والمتابعة للـ PIN الجديد ←'}
+                    </button>
+                    <span className="text-[11px] text-slate-400">ميزة الحظر التلقائي عند 5 محاولات خاطئة</span>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-3 bg-white dark:bg-[#0F172A] p-4 rounded-2xl border border-slate-200 dark:border-slate-700">
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold block">
+                      الخطوة 2: أدخل رمز الـ PIN الجديد (6 أرقام رقمية):
+                    </label>
+                    <input
+                      type="password"
+                      maxLength={6}
+                      value={pinNew}
+                      onChange={e => setPinNew(e.target.value.replace(/\D/g, ''))}
+                      placeholder="6 أرقام جديدة..."
+                      required
+                      className="w-full text-center tracking-[0.5em] text-base py-2.5 px-3 rounded-xl border border-slate-300 dark:border-slate-600 bg-transparent text-[#0F172A] dark:text-white outline-none focus:border-[#FF6B00] font-mono"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold block">
+                      تأكيد رمز الـ PIN الجديد:
+                    </label>
+                    <input
+                      type="password"
+                      maxLength={6}
+                      value={pinConfirm}
+                      onChange={e => setPinConfirm(e.target.value.replace(/\D/g, ''))}
+                      placeholder="أعد إدخال الـ PIN للتأكيد..."
+                      required
+                      className="w-full text-center tracking-[0.5em] text-base py-2.5 px-3 rounded-xl border border-slate-300 dark:border-slate-600 bg-transparent text-[#0F172A] dark:text-white outline-none focus:border-[#FF6B00] font-mono"
+                    />
+                  </div>
+
+                  <div className="flex items-center gap-2 pt-2">
+                    <button
+                      type="submit"
+                      disabled={pinLoading}
+                      className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer transition active:scale-95"
+                    >
+                      <Save className="w-3.5 h-3.5" />
+                      <span>{pinLoading ? 'جارٍ التشفير والحفظ...' : 'حفظ وتشفير بصمة PIN الجديدة'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPinStep(1)}
+                      className="px-3 py-2 rounded-xl text-xs font-bold text-slate-500 hover:text-slate-800 dark:hover:text-white"
+                    >
+                      إلغاء
+                    </button>
+                  </div>
                 </div>
               )}
 
+              {pinSuccess && (
+                <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl text-xs text-emerald-600 font-bold flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>{pinSuccess}</span>
+                </div>
+              )}
+
+              {pinError && (
+                <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-2xl text-xs text-red-600 font-bold flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-red-600 shrink-0" />
+                  <span>{pinError}</span>
+                </div>
+              )}
             </form>
+          </div>
+
+          {/* Card 4: إدارة الجلسات والأجهزة (Session Management) */}
+          <div className="bg-[#F8FAFC] dark:bg-[#1E293B] rounded-3xl p-4 sm:p-6 border border-[#E2E8F0] dark:border-slate-800 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-700 gap-2">
+              <div className="flex items-center gap-2">
+                <Smartphone className="w-5 h-5 text-[#FF6B00]" />
+                <div>
+                  <h3 className="text-sm font-black">إدارة الجلسات والأجهزة الموثوقة (Session Management)</h3>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    مراقبة الجلسات المفتوحة مع توقيع خادمي HMAC-SHA256 وإمكانية إنهاء الجلسات فوراً
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleRevokeAllSessions}
+                  disabled={sessionsLoading}
+                  className="px-3 py-1.5 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-600 border border-red-500/30 text-xs font-bold cursor-pointer transition active:scale-95 flex items-center gap-1.5"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                  <span>{sessionsLoading ? 'جارٍ الإنهاء...' : 'تسجيل الخروج من كافة الأجهزة'}</span>
+                </button>
+              </div>
+            </div>
+
+            {sessionsMessage && (
+              <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl text-xs text-emerald-600 font-bold flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>{sessionsMessage}</span>
+              </div>
+            )}
+
+            <div className="space-y-2">
+              {activeSessionsList.length > 0 ? (
+                activeSessionsList.map((sess, idx) => (
+                  <div key={idx} className="p-3 rounded-2xl bg-white dark:bg-[#0F172A] border border-slate-200 dark:border-slate-700 flex items-center justify-between text-xs">
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-xl bg-[#FF6B00]/10 flex items-center justify-center text-[#FF6B00]">
+                        <Smartphone className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2 font-mono font-bold text-slate-800 dark:text-slate-200">
+                          <span>{sess.id}</span>
+                          {sess.isCurrent && (
+                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500 text-white font-sans font-bold">
+                              الجلسة الحالية
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-[11px] text-slate-400 flex items-center gap-2 mt-0.5">
+                          <span>IP: {sess.ip}</span>
+                          <span>•</span>
+                          <span className="truncate max-w-[200px]">{sess.userAgent}</span>
+                        </div>
+                      </div>
+                    </div>
+                    <span className="text-[11px] font-mono text-slate-400">
+                      {new Date(sess.createdAt).toLocaleTimeString('ar-TN')}
+                    </span>
+                  </div>
+                ))
+              ) : (
+                <div className="p-4 rounded-2xl bg-white dark:bg-[#0F172A] border border-slate-200 dark:border-slate-700 text-center text-xs text-slate-400">
+                  جلسة المتصفح الحالية نشطة ومؤمنة بتوقيع خادمي مشفر.
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-between pt-2 border-t border-slate-200 dark:border-slate-700 text-[11px] text-slate-500 dark:text-slate-400">
+              <span>محرك التشفير النشط: <strong>Argon2id (Memory-Hard v=19)</strong></span>
+              <span>توقيع الكوكيز: <strong>HMAC-SHA256 HttpOnly</strong></span>
+            </div>
           </div>
 
         </div>

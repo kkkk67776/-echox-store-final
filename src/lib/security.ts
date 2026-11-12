@@ -408,3 +408,119 @@ export async function emergencyLockdownCall() {
 export async function getSecurityStatusCall() {
   return { activeLayers: 4, locked: false, attemptsLeft: 5 };
 }
+
+// ==========================================
+// 🛡️ SERVER-SIDE ARGON2ID SECURITY CLIENT APIS
+// ==========================================
+
+export async function verifyAccessCodeServer(code: string): Promise<{
+  success: boolean;
+  lockedOut?: boolean;
+  remainingSeconds?: number;
+  attemptsLeft?: number;
+  error?: string;
+}> {
+  try {
+    const res = await fetch('/api/security/verifyAccessCode', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code: code.trim() })
+    });
+    const data = await res.json();
+    return data;
+  } catch (err) {
+    console.warn('[Security] verifyAccessCodeServer notice:', err);
+    return { success: false, error: 'فشل الاتصال بالخادم لفحص رمز الوصول.' };
+  }
+}
+
+export async function verifyPinServer(pin: string): Promise<{
+  success: boolean;
+  sessionId?: string;
+  lockedOut?: boolean;
+  remainingSeconds?: number;
+  attemptsLeft?: number;
+  error?: string;
+}> {
+  try {
+    const res = await fetch('/api/security/verifyPin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pin: pin.trim() })
+    });
+    const data = await res.json();
+    if (data.success) {
+      setOwnerUnlocked(true);
+    }
+    return data;
+  } catch (err) {
+    console.warn('[Security] verifyPinServer notice:', err);
+    return { success: false, error: 'فشل الاتصال بالخادم للتحقق من PIN.' };
+  }
+}
+
+export async function updateAccessCodeServer(currentPinOrCode: string, newCode: string): Promise<{
+  success: boolean;
+  message?: string;
+  error?: string;
+}> {
+  try {
+    const res = await fetch('/api/security/updateAccessCode', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ currentPinOrCode, newCode })
+    });
+    const data = await res.json();
+    return data;
+  } catch (err) {
+    return { success: false, error: 'تعذر تحديث رمز الوصول على الخادم.' };
+  }
+}
+
+export async function updatePinServer(currentPin: string, newPin: string): Promise<{
+  success: boolean;
+  message?: string;
+  error?: string;
+}> {
+  try {
+    const res = await fetch('/api/security/updatePin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ currentPin, newPin })
+    });
+    const data = await res.json();
+    return data;
+  } catch (err) {
+    return { success: false, error: 'تعذر تحديث رمز الـ PIN على الخادم.' };
+  }
+}
+
+export async function fetchActiveSessions(): Promise<{
+  sessions: Array<{ id: string; ip: string; userAgent: string; createdAt: string; isCurrent: boolean }>;
+  securityEngine: string;
+}> {
+  try {
+    const res = await fetch('/api/security/sessions');
+    if (res.ok) {
+      return await res.json();
+    }
+  } catch {}
+  return { sessions: [], securityEngine: 'Argon2id' };
+}
+
+export async function revokeAllSessionsServer(): Promise<{ success: boolean; message: string }> {
+  try {
+    const res = await fetch('/api/security/logoutAllDevices', { method: 'POST' });
+    return await res.json();
+  } catch {
+    return { success: false, message: 'فشل إنهاء الجلسات.' };
+  }
+}
+
+export async function fetchSecuritySystemStatus(): Promise<any> {
+  try {
+    const res = await fetch('/api/security/systemStatus');
+    if (res.ok) return await res.json();
+  } catch {}
+  return { argon2idEnabled: true, serverSideEnforced: true };
+}

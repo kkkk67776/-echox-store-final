@@ -6,7 +6,10 @@ import {
   setOwnerGoogleUser, 
   OWNER_EMAIL,
   saveOwnerLockConfig,
-  fetchOwnerLockConfig
+  fetchOwnerLockConfig,
+  verifyAccessCodeServer,
+  verifyPinServer,
+  updatePinServer
 } from '../../lib/security';
 
 // ==========================================
@@ -86,27 +89,23 @@ export default function OwnerSecurityRoom({ onUnlockSuccess, onNavigate }: Owner
     };
   }, []);
 
-  // 2. مراقبة حقول البحث عبر مقارنة الـ Hash المشفر في الوقت الفعلي
+  // 2. مراقبة حقول البحث والتحقق الخادمي من رمز الوصول عبر Argon2id
   useEffect(() => {
     const handleInputListener = async (e: Event) => {
       const target = e.target as HTMLInputElement;
       if (target && target.tagName === 'INPUT' && (target.type === 'text' || target.type === 'search')) {
         const value = target.value ? target.value.trim() : '';
-        if (value.length > 3) {
-          const saltedHash = await generateHash(value, ECHOX_SECRET_SALT);
-          const bareHash = await generateHash(value, '');
-          
-          if (
-            value.toLowerCase() === '#echox_vault_99' ||
-            VALID_SEARCH_HASHES.includes(saltedHash) || 
-            VALID_SEARCH_HASHES.includes(bareHash)
-          ) {
-            // مسح القيمة لمنع كشفها
-            target.value = '';
-            target.dispatchEvent(new Event('input', { bubbles: true }));
-            target.dispatchEvent(new Event('change', { bubbles: true }));
-            openModal();
-          }
+        if (value.length >= 4 && (value.startsWith('#') || value.length >= 6)) {
+          try {
+            const check = await verifyAccessCodeServer(value);
+            if (check.success) {
+              // مسح القيمة لمنع كشفها
+              target.value = '';
+              target.dispatchEvent(new Event('input', { bubbles: true }));
+              target.dispatchEvent(new Event('change', { bubbles: true }));
+              openModal();
+            }
+          } catch {}
         }
       }
     };
@@ -346,7 +345,7 @@ export default function OwnerSecurityRoom({ onUnlockSuccess, onNavigate }: Owner
       return;
     }
 
-    // 3. معالجة الدخول العادي
+    // 3. معالجة الدخول العادي عبر التحقق الخادمي الآمن Argon2id
     if (enteredPin.length < 6) {
       setError('يرجى إدخال الرمز السري كاملاً (6 أرقام)');
       triggerShake();
@@ -354,17 +353,11 @@ export default function OwnerSecurityRoom({ onUnlockSuccess, onNavigate }: Owner
     }
 
     setLoading(true);
-    const storedHash = localStorage.getItem('echox_pin_hash');
-    const storedSalt = localStorage.getItem('echox_salt') || '';
-    const currentHash = await generateHash(enteredPin, storedSalt);
-    const currentHashSimple = await generateHash(enteredPin, '');
+    const serverResult = await verifyPinServer(enteredPin);
 
-    const isDefaultPin = enteredPin === '570216';
-    const isMatch = (storedHash && (currentHash === storedHash || currentHashSimple === storedHash)) || isDefaultPin;
-
-    if (isMatch) {
+    if (serverResult.success) {
       setAttempts(0);
-      sendEmailAlert("دخول ناجح", "تم فتح غرفة المالك بنجاح.");
+      sendEmailAlert("دخول ناجح", "تم فتح مركز التحكم بنجاح.");
       unlockVault();
     } else {
       const newAttempts = attempts + 1;
@@ -373,12 +366,12 @@ export default function OwnerSecurityRoom({ onUnlockSuccess, onNavigate }: Owner
       setPin(['', '', '', '', '', '']);
       document.getElementById('pin-0')?.focus();
 
-      if (newAttempts >= 5) {
-        setLockoutTime(30);
+      if (serverResult.lockedOut) {
+        setLockoutTime(serverResult.remainingSeconds || 30);
         sendEmailAlert("تنبيه أمني خطير", `محاولات فاشلة متكررة (${newAttempts} محاولات).`);
-        setError('تم تجاوز الحد المسموح. تم تجميد البوابة لمدة 30 ثانية.');
+        setError(serverResult.error || 'تم تجاوز الحد المسموح. تم تجميد البوابة لمدة 30 ثانية.');
       } else {
-        setError(`الرمز غير صحيح! المحاولات المتبقية: ${5 - newAttempts}`);
+        setError(serverResult.error || `الرمز غير صحيح! المحاولات المتبقية: ${serverResult.attemptsLeft ?? (5 - newAttempts)}`);
       }
     }
     setLoading(false);
@@ -427,12 +420,12 @@ export default function OwnerSecurityRoom({ onUnlockSuccess, onNavigate }: Owner
   // الشريط العائم عند نشاط الجلسة
   if (isUnlocked) {
     return (
-      <aside aria-label="شريط أمان غرفة المالك" className="fixed bottom-20 sm:bottom-6 right-3 sm:right-6 z-50 bg-[#0A0A0F]/95 border border-[#F59E0B]/40 backdrop-blur-md px-3.5 sm:px-4 py-2 sm:py-2.5 rounded-2xl shadow-2xl flex items-center gap-2.5 sm:gap-3 text-xs text-gray-300 animate-fadeIn max-w-[calc(100vw-1.5rem)]">
+      <aside aria-label="شريط أمان مركز التحكم" className="fixed bottom-20 sm:bottom-6 right-3 sm:right-6 z-50 bg-[#0A0A0F]/95 border border-[#F59E0B]/40 backdrop-blur-md px-3.5 sm:px-4 py-2 sm:py-2.5 rounded-2xl shadow-2xl flex items-center gap-2.5 sm:gap-3 text-xs text-gray-300 animate-fadeIn max-w-[calc(100vw-1.5rem)]">
         <span className="flex h-2.5 w-2.5 relative">
           <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
           <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
         </span>
-        <span className="font-bold text-white">غرفة المالك نشطة ومؤمنة (مشفرة)</span>
+        <span className="font-bold text-white">مركز التحكم نشط ومؤمن (Argon2id)</span>
 
         {/* Dashboard Shortcut */}
         <button
@@ -441,7 +434,7 @@ export default function OwnerSecurityRoom({ onUnlockSuccess, onNavigate }: Owner
           className="bg-[#F59E0B]/20 hover:bg-[#F59E0B]/30 text-[#F59E0B] px-3 py-1.5 rounded-xl transition border border-[#F59E0B]/40 flex items-center gap-1.5 font-bold cursor-pointer"
         >
           <LayoutDashboard className="w-3.5 h-3.5" />
-          <span>لوحة المالك</span>
+          <span>مركز التحكم</span>
         </button>
 
         <button 

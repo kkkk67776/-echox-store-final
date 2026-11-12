@@ -1,0 +1,19 @@
+{
+  "access_code_argon2": "$argon2id$v=19$m=65536,t=3,p=4$L32cy6EOiWdqY6LxBDoknA$+xdvKFVg++rImusfx2U+XZKWvVIxHoIUEoyZL/vlpRw",
+  "pin_argon2": "$argon2id$v=19$m=65536,t=3,p=4$QRoTtDau0g/bydokawO6JA$nMAQe1UMgspWQ5Q4LRIzmoSwqLqENN34vKGiok8KGg0",
+  "updated_at": "2026-11-12T11:04:26.857Z",
+  "history": [
+    {
+      "type": "ACCESS_CODE_CHANGED",
+      "timestamp": "2026-11-12T11:04:26.857Z"
+    },
+    {
+      "type": "ACCESS_CODE_CHANGED",
+      "timestamp": "2026-11-12T11:04:15.196Z"
+    },
+    {
+      "type": "INITIALIZED",
+      "timestamp": "2026-11-12T11:03:54.183Z"
+    }
+  ]
+}

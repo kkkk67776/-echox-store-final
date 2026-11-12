@@ -47,7 +47,7 @@ export default function StoreNavigation({ onNavigate, wishlistCount }: StoreNavi
         <span>اتصل بنا مباشرة</span>
       </button>
 
-      {/* تم إخفاء زر "غرفة المالك" نهائياً من هنا لضمان السرية التامة */}
+      {/* تم إخفاء زر "مركز التحكم" نهائياً من هنا لضمان السرية التامة */}
     </div>
   );
 }

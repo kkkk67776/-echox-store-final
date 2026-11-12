@@ -4,6 +4,7 @@ import crypto from 'crypto';
 import dotenv from 'dotenv';
 import path from 'path';
 import fs from 'fs';
+import argon2 from 'argon2';
 
 dotenv.config();
 
@@ -102,8 +103,61 @@ function verifySignedSession(cookieVal: string): string | null {
   return null;
 }
 
-// Active signed server sessions
-const activeSessions = new Map<string, { email: string; owner: boolean; codeVerified: boolean; expiresAt: number }>();
+const activeSessions = new Map<string, { email: string; owner: boolean; codeVerified: boolean; expiresAt: number; ip?: string; userAgent?: string; createdAt?: string }>();
+
+// ==========================================
+// 🛡️ ARGON2ID CENTRALIZED SECURITY SYSTEM
+// ==========================================
+const CENTRAL_SECURITY_FILE = path.resolve(process.cwd(), 'central_security_config.json');
+
+interface CentralSecurityConfig {
+  access_code_argon2: string; // Argon2id hash for search access code (default: '#echox_vault_99')
+  pin_argon2: string;         // Argon2id hash for PIN code (default: '570216')
+  updated_at: string;
+  history: Array<{ type: string; timestamp: string }>;
+}
+
+let centralSecurityConfig: CentralSecurityConfig | null = null;
+let accessCodeLockoutUntil = 0;
+let accessCodeFailedAttempts = 0;
+let pinLockoutUntil = 0;
+let pinFailedAttempts = 0;
+
+async function initCentralSecurityConfig(): Promise<CentralSecurityConfig> {
+  try {
+    if (fs.existsSync(CENTRAL_SECURITY_FILE)) {
+      const data = JSON.parse(fs.readFileSync(CENTRAL_SECURITY_FILE, 'utf-8'));
+      if (data && data.access_code_argon2 && data.pin_argon2) {
+        centralSecurityConfig = data;
+        return data;
+      }
+    }
+  } catch (err) {
+    console.warn('[Security] Notice reading central security config, generating initial hashes:', err);
+  }
+
+  // Generate initial Argon2id hashes for default credentials
+  const accessHash = await argon2.hash('#echox_vault_99', { type: argon2.argon2id });
+  const pinHash = await argon2.hash('570216', { type: argon2.argon2id });
+
+  const config: CentralSecurityConfig = {
+    access_code_argon2: accessHash,
+    pin_argon2: pinHash,
+    updated_at: new Date().toISOString(),
+    history: [{ type: 'INITIALIZED', timestamp: new Date().toISOString() }]
+  };
+
+  try {
+    fs.writeFileSync(CENTRAL_SECURITY_FILE, JSON.stringify(config, null, 2));
+  } catch (err) {
+    console.warn('[Security] Notice writing central security config:', err);
+  }
+
+  centralSecurityConfig = config;
+  return config;
+}
+
+initCentralSecurityConfig().catch(console.error);
 
 function parseCookies(req: Request): Record<string, string> {
   const list: Record<string, string> = {};
@@ -637,6 +691,328 @@ app.post('/api/security/logoutAllDevices', (_req: Request, res: Response) => {
   return res.json({
     success: true,
     message: `تم تسجيل الخروج بنجاح من جميع الأجهزة النشطة (${count} جلسة).`
+  });
+});
+
+// ==========================================
+// 🛡️ ARGON2ID ACCESS CODE & PIN ENDPOINTS
+// ==========================================
+
+// 1. Verify Secret Access Code (invoked from search bar)
+app.post('/api/security/verifyAccessCode', async (req: Request, res: Response) => {
+  try {
+    const now = Date.now();
+    if (now < accessCodeLockoutUntil) {
+      const remainingSeconds = Math.ceil((accessCodeLockoutUntil - now) / 1000);
+      return res.status(429).json({
+        success: false,
+        lockedOut: true,
+        remainingSeconds,
+        error: `تم تجميد محاولات رمز الوصول، يرجى الانتظار ${remainingSeconds} ثانية.`
+      });
+    }
+
+    if (!centralSecurityConfig) {
+      await initCentralSecurityConfig();
+    }
+
+    const { code } = req.body || {};
+    if (!code || typeof code !== 'string') {
+      return res.status(400).json({ success: false, error: 'رمز الوصول مطلوب.' });
+    }
+
+    const trimmed = code.trim();
+    if (trimmed.length < 3) {
+      return res.status(400).json({ success: false, error: 'رمز الوصول قصير جداً.' });
+    }
+
+    // Argon2id verification
+    let isMatch = false;
+    try {
+      isMatch = await argon2.verify(centralSecurityConfig!.access_code_argon2, trimmed);
+    } catch (e) {
+      console.warn('Argon2 verify access code error:', e);
+    }
+
+    if (isMatch) {
+      accessCodeFailedAttempts = 0;
+      accessCodeLockoutUntil = 0;
+      return res.json({
+        success: true,
+        message: 'تم التحقق من رمز الوصول بنجاح.'
+      });
+    }
+
+    // Failed attempt
+    accessCodeFailedAttempts++;
+    if (accessCodeFailedAttempts >= 5) {
+      accessCodeLockoutUntil = Date.now() + 30000;
+      return res.status(429).json({
+        success: false,
+        lockedOut: true,
+        remainingSeconds: 30,
+        error: 'تجاوزت عدد المحاولات المسموح به. تم تجميد البوابة لمدة 30 ثانية.'
+      });
+    }
+
+    return res.status(401).json({
+      success: false,
+      lockedOut: false,
+      remainingSeconds: 0,
+      attemptsLeft: Math.max(0, 5 - accessCodeFailedAttempts),
+      error: 'رمز الوصول غير صحيح.'
+    });
+
+  } catch (err: any) {
+    console.error('Error in /api/security/verifyAccessCode:', err);
+    return res.status(500).json({ error: 'خطأ في معالجة فحص رمز الوصول.' });
+  }
+});
+
+// 2. Verify PIN with Argon2id
+app.post('/api/security/verifyPin', async (req: Request, res: Response) => {
+  try {
+    const now = Date.now();
+    if (now < pinLockoutUntil) {
+      const remainingSeconds = Math.ceil((pinLockoutUntil - now) / 1000);
+      return res.status(429).json({
+        success: false,
+        lockedOut: true,
+        remainingSeconds,
+        error: `تم تجميد محاولات PIN، يرجى الانتظار ${remainingSeconds} ثانية.`
+      });
+    }
+
+    if (!centralSecurityConfig) {
+      await initCentralSecurityConfig();
+    }
+
+    const { pin } = req.body || {};
+    if (!pin || typeof pin !== 'string') {
+      return res.status(400).json({ success: false, error: 'رمز PIN مطلوب.' });
+    }
+
+    const trimmed = pin.trim();
+    let isMatch = false;
+    try {
+      isMatch = await argon2.verify(centralSecurityConfig!.pin_argon2, trimmed);
+    } catch (e) {
+      console.warn('Argon2 verify pin notice:', e);
+    }
+
+    if (isMatch) {
+      pinFailedAttempts = 0;
+      pinLockoutUntil = 0;
+
+      const rawSessionId = `admin_${crypto.randomBytes(32).toString('hex')}`;
+      const fiveDaysMs = 5 * 24 * 60 * 60 * 1000;
+      const expiresAt = Date.now() + fiveDaysMs;
+
+      activeSessions.set(rawSessionId, {
+        email: OWNER_EMAIL,
+        owner: true,
+        codeVerified: true,
+        expiresAt,
+        ip: (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress || '127.0.0.1',
+        userAgent: req.headers['user-agent'] || 'Browser',
+        createdAt: new Date().toISOString()
+      });
+
+      const signedCookie = signSessionId(rawSessionId);
+      res.setHeader('Set-Cookie', [
+        `__session=${signedCookie}; Path=/; Max-Age=${5 * 24 * 3600}; SameSite=Lax; HttpOnly`
+      ]);
+
+      return res.json({
+        success: true,
+        sessionId: rawSessionId,
+        message: 'تم التحقق بنجاح والدخول إلى مركز التحكم.'
+      });
+    }
+
+    pinFailedAttempts++;
+    if (pinFailedAttempts >= 5) {
+      pinLockoutUntil = Date.now() + 30000;
+      return res.status(429).json({
+        success: false,
+        lockedOut: true,
+        remainingSeconds: 30,
+        error: 'تجاوزت عدد محاولات PIN المسموحة. تم قفل البوابة مؤقتاً لمدة 30 ثانية.'
+      });
+    }
+
+    return res.status(401).json({
+      success: false,
+      lockedOut: false,
+      remainingSeconds: 0,
+      attemptsLeft: Math.max(0, 5 - pinFailedAttempts),
+      error: `رمز PIN غير صحيح! المحاولات المتبقية: ${Math.max(0, 5 - pinFailedAttempts)}`
+    });
+
+  } catch (err: any) {
+    console.error('Error in /api/security/verifyPin:', err);
+    return res.status(500).json({ error: 'خطأ أثناء التحقق من PIN.' });
+  }
+});
+
+// 3. Update Access Code
+app.post('/api/security/updateAccessCode', async (req: Request, res: Response) => {
+  try {
+    if (!centralSecurityConfig) {
+      await initCentralSecurityConfig();
+    }
+
+    const { currentPinOrCode, newCode } = req.body || {};
+    if (!currentPinOrCode || !newCode) {
+      return res.status(400).json({ error: 'الرمز الحالي والرمز الجديد كلاهما مطلوبان.' });
+    }
+
+    let isAuthorized = false;
+    try {
+      if (await argon2.verify(centralSecurityConfig!.pin_argon2, String(currentPinOrCode).trim())) {
+        isAuthorized = true;
+      }
+    } catch {}
+
+    if (!isAuthorized) {
+      try {
+        if (await argon2.verify(centralSecurityConfig!.access_code_argon2, String(currentPinOrCode).trim())) {
+          isAuthorized = true;
+        }
+      } catch {}
+    }
+
+    if (!isAuthorized) {
+      return res.status(401).json({ error: 'رمز التحقق الحالي غير صحيح.' });
+    }
+
+    const cleanNew = String(newCode).trim();
+    if (cleanNew.length < 4) {
+      return res.status(400).json({ error: 'يجب أن يتكون رمز الوصول الجديد من 4 خانات على الأقل.' });
+    }
+
+    const newHash = await argon2.hash(cleanNew, { type: argon2.argon2id });
+    centralSecurityConfig!.access_code_argon2 = newHash;
+    centralSecurityConfig!.updated_at = new Date().toISOString();
+    centralSecurityConfig!.history = [
+      { type: 'ACCESS_CODE_CHANGED', timestamp: new Date().toISOString() },
+      ...(centralSecurityConfig!.history || [])
+    ].slice(0, 10);
+
+    fs.writeFileSync(CENTRAL_SECURITY_FILE, JSON.stringify(centralSecurityConfig, null, 2));
+
+    accessCodeFailedAttempts = 0;
+    accessCodeLockoutUntil = 0;
+
+    return res.json({
+      success: true,
+      message: 'تم تحديث رمز الوصول السري بنجاح وتشفيره ببصمة Argon2id فورياً.'
+    });
+
+  } catch (err: any) {
+    console.error('Error updating access code:', err);
+    return res.status(500).json({ error: 'فشل حفظ رمز الوصول الجديد.' });
+  }
+});
+
+// 4. Update PIN
+app.post('/api/security/updatePin', async (req: Request, res: Response) => {
+  try {
+    if (!centralSecurityConfig) {
+      await initCentralSecurityConfig();
+    }
+
+    const { currentPin, newPin } = req.body || {};
+    if (!currentPin || !newPin) {
+      return res.status(400).json({ error: 'رمز PIN الحالي والجديد مطلوبان.' });
+    }
+
+    const pinMatch = await argon2.verify(centralSecurityConfig!.pin_argon2, String(currentPin).trim());
+    if (!pinMatch) {
+      return res.status(401).json({ error: 'رمز PIN الحالي غير صحيح.' });
+    }
+
+    const cleanNew = String(newPin).trim();
+    if (cleanNew.length !== 6 || !/^\d{6}$/.test(cleanNew)) {
+      return res.status(400).json({ error: 'يجب أن يتكون رمز الـ PIN الجديد من 6 أرقام بالضبط.' });
+    }
+
+    const newHash = await argon2.hash(cleanNew, { type: argon2.argon2id });
+    centralSecurityConfig!.pin_argon2 = newHash;
+    centralSecurityConfig!.updated_at = new Date().toISOString();
+    centralSecurityConfig!.history = [
+      { type: 'PIN_CHANGED', timestamp: new Date().toISOString() },
+      ...(centralSecurityConfig!.history || [])
+    ].slice(0, 10);
+
+    fs.writeFileSync(CENTRAL_SECURITY_FILE, JSON.stringify(centralSecurityConfig, null, 2));
+
+    try {
+      const legacyLock: OwnerLockConfigData = {
+        lock_type: 'pin',
+        lock_hash: newHash,
+        code_hash: newHash,
+        updated_at: new Date().toISOString(),
+        failed_attempts: []
+      };
+      fs.writeFileSync(OWNER_LOCK_FILE, JSON.stringify(legacyLock, null, 2));
+      ownerLockConfig = legacyLock;
+    } catch {}
+
+    pinFailedAttempts = 0;
+    pinLockoutUntil = 0;
+
+    return res.json({
+      success: true,
+      message: 'تم تحديث رمز PIN بنجاح وتشفيره ببصمة Argon2id فورياً.'
+    });
+
+  } catch (err: any) {
+    console.error('Error updating PIN:', err);
+    return res.status(500).json({ error: 'فشل حفظ رمز الـ PIN الجديد.' });
+  }
+});
+
+// 5. Active Sessions List
+app.get('/api/security/sessions', (req: Request, res: Response) => {
+  const cookies = parseCookies(req);
+  const currentCookie = cookies['__session'];
+  const currentSessionId = currentCookie ? verifySignedSession(currentCookie) : null;
+
+  const list: Array<{
+    id: string;
+    ip: string;
+    userAgent: string;
+    createdAt: string;
+    isCurrent: boolean;
+  }> = [];
+
+  activeSessions.forEach((val, id) => {
+    list.push({
+      id: `${id.substring(0, 8)}...${id.substring(id.length - 4)}`,
+      ip: (val as any).ip || '127.0.0.1',
+      userAgent: (val as any).userAgent || 'Browser',
+      createdAt: (val as any).createdAt || new Date().toISOString(),
+      isCurrent: id === currentSessionId
+    });
+  });
+
+  return res.json({
+    sessions: list,
+    securityEngine: 'Argon2id + HMAC-SHA256'
+  });
+});
+
+// 6. Security System Status
+app.get('/api/security/systemStatus', (_req: Request, res: Response) => {
+  return res.json({
+    argon2idEnabled: true,
+    hashingAlgorithm: 'Argon2id (m=65536, t=3, p=4)',
+    serverSideEnforced: true,
+    activeSessionsCount: activeSessions.size,
+    accessCodeConfigured: true,
+    pinConfigured: true,
+    updatedAt: centralSecurityConfig?.updated_at || new Date().toISOString()
   });
 });
 

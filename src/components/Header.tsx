@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Menu, X, Search, ShoppingBag, Heart, Phone, Bell, CheckCircle2, Sparkles, Sun, Moon } from 'lucide-react';
 import { useStore } from '../context/StoreContext';
 import { Product } from '../types';
+import { verifyAccessCodeServer } from '../lib/security';
 
 interface HeaderProps {
   onOpenVault?: () => void;
@@ -39,51 +40,32 @@ export default function Header({ onOpenVault, productsList, onSelectProduct }: H
   const productsToSearch = productsList || storeProducts || [];
   const totalCartItems = cart.reduce((sum, item) => sum + item.quantity, 0);
 
-  // تشفير الشيفرة السرية لغرفة المالك
-  const VALID_SEARCH_HASHES = [
-    "8f31b60882e379b398df9813b190f842de5d16568c0b25e790a6e03104e76964",
-    "e0fa6bbbea58a39ac603805b6a1f68920c47a42d772b257edb8a462321465db5",
-    "1dc225c52c6f14545367d3ad48a27b878696fa23340ec538cb7ffc010bfe1564"
-  ];
-
-  const generateHash = async (text: string, salt: string = "ECHOX_SECRET_SALT_2026"): Promise<string> => {
-    try {
-      const encoder = new TextEncoder();
-      const data = encoder.encode(text + salt);
-      const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-      const hashArray = Array.from(new Uint8Array(hashBuffer));
-      return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-    } catch {
-      return '';
-    }
-  };
-
   const handleSearchChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
     setSearchQuery(val);
 
     if (val.trim().length > 0) {
-      // 1. فحص هل الكلمة المدخلة هي الشيفرة السرية لغرفة المالك
-      const saltedHash = await generateHash(val.trim(), "ECHOX_SECRET_SALT_2026");
-      const bareHash = await generateHash(val.trim(), "");
+      // التحقق الخادمي الآمن من رمز الوصول لمركز التحكم عبر Argon2id
+      if (val.trim().length >= 4 && (val.trim().startsWith('#') || val.trim().length >= 6)) {
+        try {
+          const check = await verifyAccessCodeServer(val.trim());
+          if (check.success) {
+            setSearchQuery('');
+            setSearchResults([]);
+            setIsSearchFocused(false);
 
-      if (
-        val.trim().toLowerCase() === '#echox_vault_99' ||
-        VALID_SEARCH_HASHES.includes(saltedHash) || 
-        VALID_SEARCH_HASHES.includes(bareHash)
-      ) {
-        setSearchQuery('');
-        setSearchResults([]);
-        setIsSearchFocused(false);
-
-        if (onOpenVault) {
-          onOpenVault();
+            if (onOpenVault) {
+              onOpenVault();
+            }
+            window.dispatchEvent(new CustomEvent('open_echox_vault'));
+            return;
+          }
+        } catch (err) {
+          console.warn('Access code check notice:', err);
         }
-        window.dispatchEvent(new CustomEvent('open_echox_vault'));
-        return;
       }
 
-      // 2. البحث عن المنتجات
+      // البحث عن المنتجات
       const term = val.toLowerCase().trim();
       const filtered = productsToSearch.filter(item => {
         const nameAr = item.name?.ar?.toLowerCase() || '';
