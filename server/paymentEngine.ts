@@ -416,6 +416,8 @@ export function getPublicPaymentConfig(): PaymentSystemPublicConfig {
     currency: cfg.currency,
     commissionRatePercent: cfg.commissionRatePercent,
     taxRatePercent: cfg.taxRatePercent,
+    standardShippingFee: cfg.shipping.standardShippingFee,
+    freeShippingThreshold: cfg.shipping.freeShippingThreshold,
     methods: {
       cod: { enabled: !!cfg.methods.cod.enabled },
       bank_transfer: getVerifiedBankTransferPublic(),
@@ -1357,6 +1359,147 @@ export function getScopedVendorFinancials(vendorId: string) {
     subOrders,
     ledgerEntries: entries,
   };
+}
+
+export function adminCreateManualOrder(input: Partial<Order>): {
+  ok: boolean;
+  statusCode?: number;
+  error?: string;
+  order?: Order;
+} {
+  const customerName = (input.customerName || '').trim();
+  const customerPhone = (input.customerPhone || '').trim();
+  const amount = round3(Number(input.totalAmount ?? input.subtotal ?? 0));
+
+  if (!customerName || !customerPhone || !Number.isFinite(amount) || amount < 0) {
+    return { ok: false, statusCode: 400, error: 'بيانات الطلب اليدوي غير مكتملة أو غير صالحة.' };
+  }
+
+  const now = new Date().toISOString();
+  const orderId = input.id && input.id.startsWith('ord_')
+    ? input.id
+    : `ord_manual_${Date.now()}_${crypto.randomBytes(2).toString('hex')}`;
+  const trackingNumber =
+    (input.trackingNumber || '').trim().toUpperCase() ||
+    `ECH-TN-${Math.floor(100000 + Math.random() * 900000)}`;
+  const paymentMethod = normalizePaymentMethod(input.paymentMethod || 'cod');
+  const paymentStatus: PaymentStatus =
+    input.paymentStatus ||
+    (paymentMethod === 'cod' ? 'Cash on Delivery' : 'Pending Payment');
+
+  const created: Order = {
+    id: orderId,
+    trackingNumber,
+    customerName,
+    customerEmail: (input.customerEmail || '').trim(),
+    customerPhone,
+    shippingAddress: input.shippingAddress || {
+      id: `addr_${Date.now()}`,
+      isDefault: true,
+      fullName: customerName,
+      phone: customerPhone,
+      governorate: 'tunis',
+      city: 'تونس العاصمة',
+      postalCode: '1000',
+      street: 'طلب مباشر عبر الهاتف / واتساب',
+    },
+    items:
+      Array.isArray(input.items) && input.items.length > 0
+        ? input.items
+        : [
+            {
+              productId: 'manual_item',
+              productName: {
+                ar: 'طلب هاتفي مباشر',
+                fr: 'Commande directe',
+                en: 'Direct Order',
+              },
+              productImage: '/assets/images/echox-logo.webp',
+              unitPrice: amount,
+              quantity: 1,
+              totalPrice: amount,
+            },
+          ],
+    subtotal: round3(Number(input.subtotal ?? amount)),
+    discount: round3(Number(input.discount ?? 0)),
+    taxAmount: round3(Number(input.taxAmount ?? 0)),
+    shippingFee: round3(Number(input.shippingFee ?? 0)),
+    totalAmount: amount,
+    currency: paymentDb.config.currency,
+    status: input.status || 'new',
+    paymentMethod,
+    paymentStatus,
+    carrierName: (input.carrierName || '').trim() || 'LivriTN Logistics',
+    createdAt: now,
+    updatedAt: now,
+    notes: (input.notes || '').trim() || 'تم التسجيل يدوياً من لوحة التحكم',
+    statusHistory: [
+      {
+        status: input.status || 'new',
+        timestamp: now,
+        note: 'تم تسجيل الطلب يدوياً عبر الهاتف / واتساب',
+      },
+    ],
+  };
+
+  paymentDb.orders = [created, ...paymentDb.orders.filter(o => o.id !== created.id)];
+  appendActivity(
+    'MANUAL_ORDER_CREATED',
+    'admin',
+    `Admin recorded manual order ${created.trackingNumber} for ${created.customerName}.`,
+    created.id,
+    created.totalAmount
+  );
+  saveDatabase(paymentDb);
+  return { ok: true, order: created };
+}
+
+export function adminDeleteOrder(orderId: string): {
+  ok: boolean;
+  statusCode?: number;
+  error?: string;
+} {
+  const cleanId = (orderId || '').trim();
+  const target = paymentDb.orders.find(o => o.id === cleanId || o.trackingNumber === cleanId);
+  if (!target) {
+    return { ok: false, statusCode: 404, error: 'الطلب غير موجود على الخادم.' };
+  }
+
+  paymentDb.orders = paymentDb.orders.filter(o => o.id !== target.id);
+  paymentDb.transactions = paymentDb.transactions.filter(t => t.orderId !== target.id);
+  paymentDb.vendorLedgers = paymentDb.vendorLedgers.filter(v => v.orderId !== target.id);
+  paymentDb.refundRequests = paymentDb.refundRequests.filter(r => r.orderId !== target.id);
+
+  appendActivity(
+    'ORDER_DELETED',
+    'admin',
+    `Admin deleted order ${target.trackingNumber} (${target.customerName}).`,
+    target.id,
+    target.totalAmount
+  );
+  saveDatabase(paymentDb);
+  return { ok: true };
+}
+
+export function trackPublicOrder(code: string): {
+  ok: boolean;
+  statusCode?: number;
+  error?: string;
+  order?: Order;
+} {
+  const clean = (code || '').trim().toUpperCase();
+  if (!clean || clean.length < 4) {
+    return { ok: false, statusCode: 400, error: 'يرجى إدخال رقم تتبع صالح.' };
+  }
+  const found = paymentDb.orders.find(
+    o =>
+      o.trackingNumber.toUpperCase() === clean ||
+      (o.paymentReference && o.paymentReference.toUpperCase() === clean)
+  );
+  if (!found) {
+    return { ok: false, statusCode: 404, error: 'لم يتم العثور على طلب بهذا الرمز.' };
+  }
+  return { ok: true, order: found };
 }
 
 export function getAdminPaymentOverview() {

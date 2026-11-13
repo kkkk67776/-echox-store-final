@@ -45,6 +45,7 @@ export const PaymentManagementTab: React.FC = () => {
     paymentConfig,
     refreshPaymentConfig,
     updateOrderInState,
+    syncOrdersFromServer,
     language,
     t,
   } = useStore();
@@ -144,11 +145,20 @@ export const PaymentManagementTab: React.FC = () => {
       );
       const data = await fetchAdminPaymentOverview();
       setOverview(data);
+      if (Array.isArray(data.orders)) {
+        syncOrdersFromServer(data.orders);
+      }
 
       const cfg = data.config;
       setCurrency(cfg.currency);
       setCommissionRate(String(cfg.commissionRatePercent));
       setTaxRate(String(cfg.taxRatePercent));
+      if (typeof cfg.standardShippingFee === 'number') {
+        setShippingFee(String(cfg.standardShippingFee));
+      }
+      if (typeof cfg.freeShippingThreshold === 'number') {
+        setFreeShippingThreshold(String(cfg.freeShippingThreshold));
+      }
       setCodEnabled(cfg.methods.cod.enabled);
       setBankEnabled(cfg.methods.bank_transfer.enabled);
       setBankHolder(cfg.methods.bank_transfer.accountHolder);

@@ -1,6 +1,6 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, RecaptchaVerifier, signInWithPhoneNumber, ConfirmationResult } from 'firebase/auth';
-import { getFirestore, doc, getDocFromServer } from 'firebase/firestore';
+import { getFirestore, initializeFirestore, doc, getDocFromServer } from 'firebase/firestore';
 
 declare global {
   interface Window {
@@ -45,8 +45,18 @@ export const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 auth.languageCode = 'ar';
 
-/* CRITICAL: Initialize Firestore with the database ID */
-export const db = getFirestore(app, firestoreDatabaseId);
+/* CRITICAL: Initialize Firestore with the database ID and auto-detect long polling for iframe/proxy compatibility */
+export const db = (() => {
+  try {
+    return initializeFirestore(
+      app,
+      { experimentalAutoDetectLongPolling: true },
+      firestoreDatabaseId
+    );
+  } catch {
+    return getFirestore(app, firestoreDatabaseId);
+  }
+})();
 
 // Validate connection per Firebase skill instructions
 async function testConnection() {

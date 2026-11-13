@@ -56,6 +56,8 @@ export const DEFAULT_PUBLIC_PAYMENT_CONFIG: PaymentSystemPublicConfig = {
   currency: 'TND',
   commissionRatePercent: 10,
   taxRatePercent: 0,
+  standardShippingFee: 7,
+  freeShippingThreshold: 150,
   methods: {
     cod: { enabled: true },
     bank_transfer: {
@@ -114,9 +116,18 @@ export function getPaymentStatusTone(status: PaymentStatus): string {
 }
 
 export async function fetchPublicPaymentConfig(): Promise<PaymentSystemPublicConfig> {
-  const res = await fetch('/api/payments/config');
+  const res = await fetch('/api/payments/config', { cache: 'no-store' });
   if (!res.ok) throw new Error('Failed to load payment config');
   return res.json();
+}
+
+export async function trackOrderServer(code: string): Promise<{ ok: boolean; order?: Order; error?: string }> {
+  const res = await fetch(`/api/payments/track/${encodeURIComponent(code)}`, { cache: 'no-store' });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.success) {
+    return { ok: false, error: data.error || 'Order not found' };
+  }
+  return { ok: true, order: data.order };
 }
 
 export async function submitServerCheckout(payload: {
@@ -224,10 +235,43 @@ export async function fetchScopedVendorFinancials(vendorId: string): Promise<Sco
 // ==========================================
 
 export async function fetchAdminPaymentOverview(): Promise<AdminPaymentOverviewResponse> {
-  const res = await fetch('/api/admin/payments/overview', { credentials: 'include' });
+  const res = await fetch('/api/admin/payments/overview', { credentials: 'include', cache: 'no-store' });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || 'Unauthorized');
   return data;
+}
+
+export async function fetchAdminOrders(): Promise<Order[]> {
+  const res = await fetch('/api/admin/orders', { credentials: 'include', cache: 'no-store' });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Unauthorized');
+  return Array.isArray(data.orders) ? data.orders : [];
+}
+
+export async function createAdminManualOrderServer(payload: Partial<Order>): Promise<{ ok: boolean; order?: Order; error?: string }> {
+  const res = await fetch('/api/admin/orders', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.success) {
+    return { ok: false, error: data.error || 'Failed to save manual order' };
+  }
+  return { ok: true, order: data.order };
+}
+
+export async function deleteAdminOrderServer(orderId: string): Promise<{ ok: boolean; error?: string }> {
+  const res = await fetch(`/api/admin/orders/${encodeURIComponent(orderId)}`, {
+    method: 'DELETE',
+    credentials: 'include',
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.success) {
+    return { ok: false, error: data.error || 'Failed to delete order' };
+  }
+  return { ok: true };
 }
 
 export async function saveAdminPaymentConfig(payload: any): Promise<{ ok: boolean; config?: PaymentSystemPublicConfig; error?: string }> {
