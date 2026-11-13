@@ -36,5 +36,10 @@ export async function onRequest(context: MiddlewareContext): Promise<Response> {
     newResponse.headers.set('X-Robots-Tag', 'noindex, nofollow');
   }
 
+  // Authentication responses, including Set-Cookie, must never be cached by an edge or browser.
+  if (url.pathname.startsWith('/api/')) {
+    newResponse.headers.set('Cache-Control', 'no-store');
+  }
+
   return newResponse;
 }
