@@ -57,6 +57,8 @@ import {
   setAuthorizedOwnerPhone, 
   getOwnerGoogleUser, 
   isOwnerUnlocked,
+  setOwnerUnlocked,
+  checkServerSession,
   clearOwnerSecuritySession, 
   logoutOwnerServer,
   saveOwnerLockConfig,
@@ -252,13 +254,21 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
     let cancelled = false;
 
     async function guard() {
-      if (!isOwnerUnlocked()) {
+      let unlocked = isOwnerUnlocked();
+      if (!unlocked) {
+        unlocked = await checkServerSession();
+        if (unlocked) {
+          setOwnerUnlocked(true);
+        }
+      }
+
+      if (!unlocked) {
         clearOwnerSecuritySession();
         if (!cancelled) {
           navigate('/');
           setTimeout(() => {
             window.dispatchEvent(new CustomEvent('open_echox_vault'));
-          }, 100);
+          }, 50);
         }
         return;
       }

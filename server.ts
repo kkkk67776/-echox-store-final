@@ -74,6 +74,8 @@ function buildSessionCookie(req: Request, value: string, maxAgeSeconds: number):
 }
 
 function getClientIp(req: Request): string {
+  const cfIp = (req.headers['cf-connecting-ip'] as string) || '';
+  if (cfIp.trim()) return cfIp.trim();
   const fwd = (req.headers['x-forwarded-for'] as string) || '';
   const first = fwd.split(',')[0].trim();
   return first || req.ip || req.socket.remoteAddress || '127.0.0.1';
@@ -333,21 +335,110 @@ function checkSlidingWindowLimit(namespace: string, ip: string, maxRequests: num
   return { allowed: true, retryAfterSeconds: 0 };
 }
 
-// Signed session helpers
-function signSessionId(sessionId: string): string {
+// Signed session helpers (supports both legacy sid.hmac and stateless v2 tokens across cold restarts)
+function signSessionId(sessionId: string, issuedAt?: number, expiresAt?: number, codeVerified?: boolean): string {
+  if (issuedAt && expiresAt) {
+    const payload = `v2.${sessionId}.${issuedAt}.${expiresAt}.${codeVerified ? '1' : '0'}`;
+    const hmac = crypto.createHmac('sha256', HMAC_SECRET).update(payload).digest('hex');
+    return `${payload}.${hmac}`;
+  }
   const hmac = crypto.createHmac('sha256', HMAC_SECRET).update(sessionId).digest('hex');
   return `${sessionId}.${hmac}`;
 }
 
-function verifySignedSession(cookieVal: string): string | null {
+function verifySignedSessionDetailed(cookieVal: string): {
+  sessionId: string;
+  issuedAt?: number;
+  expiresAt?: number;
+  codeVerified?: boolean;
+} | null {
   if (!cookieVal || !cookieVal.includes('.')) return null;
   const parts = cookieVal.split('.');
+  if (parts.length === 6 && parts[0] === 'v2') {
+    const [ver, sessionId, iatStr, expStr, cvStr, hmac] = parts;
+    const payload = `${ver}.${sessionId}.${iatStr}.${expStr}.${cvStr}`;
+    const expected = crypto.createHmac('sha256', HMAC_SECRET).update(payload).digest('hex');
+    if (hmac.length === expected.length && crypto.timingSafeEqual(Buffer.from(hmac), Buffer.from(expected))) {
+      const issuedAt = Number(iatStr);
+      const expiresAt = Number(expStr);
+      if (!Number.isFinite(issuedAt) || !Number.isFinite(expiresAt) || expiresAt < Date.now()) {
+        return null;
+      }
+      const minValidAfter = centralSecurityConfig?.min_session_valid_after || 0;
+      if (issuedAt < minValidAfter) {
+        return null;
+      }
+      return {
+        sessionId,
+        issuedAt,
+        expiresAt,
+        codeVerified: cvStr === '1',
+      };
+    }
+    return null;
+  }
   if (parts.length !== 2) return null;
   const [sessionId, hmac] = parts;
   const expected = crypto.createHmac('sha256', HMAC_SECRET).update(sessionId).digest('hex');
   if (hmac.length === expected.length && crypto.timingSafeEqual(Buffer.from(hmac), Buffer.from(expected))) {
-    return sessionId;
+    return { sessionId };
   }
+  return null;
+}
+
+function verifySignedSession(cookieVal: string): string | null {
+  return verifySignedSessionDetailed(cookieVal)?.sessionId || null;
+}
+
+function resolveSessionRecord(req: Request): {
+  rawSessionId: string;
+  email: string;
+  owner: boolean;
+  codeVerified: boolean;
+  expiresAt: number;
+} | null {
+  const cookies = parseCookies(req);
+  const cookieVal = cookies['__session'];
+  if (!cookieVal) return null;
+  const parsed = verifySignedSessionDetailed(cookieVal);
+  if (!parsed) return null;
+
+  const existing = activeSessions.get(parsed.sessionId);
+  if (existing) {
+    if (existing.expiresAt < Date.now()) {
+      activeSessions.delete(parsed.sessionId);
+      return null;
+    }
+    return {
+      rawSessionId: parsed.sessionId,
+      email: existing.email,
+      owner: existing.owner,
+      codeVerified: existing.codeVerified,
+      expiresAt: existing.expiresAt,
+    };
+  }
+
+  // Rehydrate valid stateless v2 token after serverless/free-tier process restart
+  if (parsed.expiresAt && parsed.codeVerified) {
+    const restored = {
+      email: OWNER_EMAIL,
+      owner: true,
+      codeVerified: true,
+      expiresAt: parsed.expiresAt,
+      ip: getClientIp(req),
+      userAgent: req.headers['user-agent'] || 'Browser',
+      createdAt: new Date(parsed.issuedAt || Date.now()).toISOString(),
+    };
+    activeSessions.set(parsed.sessionId, restored);
+    return {
+      rawSessionId: parsed.sessionId,
+      email: restored.email,
+      owner: restored.owner,
+      codeVerified: restored.codeVerified,
+      expiresAt: restored.expiresAt,
+    };
+  }
+
   return null;
 }
 
@@ -376,6 +467,7 @@ interface CentralSecurityConfig {
   access_code_argon2: string;
   pin_argon2: string;
   updated_at: string;
+  min_session_valid_after?: number;
   history: Array<{ type: string; timestamp: string }>;
 }
 
@@ -484,20 +576,8 @@ app.post('/api/createOwnerSession', async (req: Request, res: Response) => {
 
 // 4. owner/me (Route Guard Server Verification)
 app.get('/api/owner/me', (req: Request, res: Response) => {
-  const cookies = parseCookies(req);
-  const cookieVal = cookies['__session'];
-
-  if (!cookieVal) {
-    return res.status(401).json({ authenticated: false, error: 'لا توجد جلسة cookie صالحة.' });
-  }
-
-  const rawSessionId = verifySignedSession(cookieVal);
-  if (!rawSessionId) {
-    return res.status(401).json({ authenticated: false, error: 'توقيع الجلسة غير صالح أو تم التلاعب به.' });
-  }
-
-  const session = activeSessions.get(rawSessionId);
-  if (!session || session.expiresAt < Date.now() || session.email !== OWNER_EMAIL || !session.owner) {
+  const session = resolveSessionRecord(req);
+  if (!session || session.email !== OWNER_EMAIL || !session.owner) {
     return res.status(401).json({ authenticated: false, error: 'جلسة منتهية أو غير مصرح بها.' });
   }
 
@@ -637,6 +717,10 @@ app.post('/api/security/emergencyLockdown', (req: Request, res: Response) => {
   try {
     const sessionCount = activeSessions.size;
     activeSessions.clear();
+    if (centralSecurityConfig) {
+      centralSecurityConfig.min_session_valid_after = Date.now() + 1;
+      persistCentralSecurityConfig(centralSecurityConfig);
+    }
 
     res.setHeader('Set-Cookie', [
       buildSessionCookie(req, '', 0)
@@ -923,6 +1007,10 @@ app.post('/api/security/logoutAllDevices', (req: Request, res: Response) => {
   if (!requireAdminAuth(req, res)) return;
   const count = activeSessions.size;
   activeSessions.clear();
+  if (centralSecurityConfig) {
+    centralSecurityConfig.min_session_valid_after = Date.now() + 1;
+    persistCentralSecurityConfig(centralSecurityConfig);
+  }
   res.setHeader('Set-Cookie', [
     buildSessionCookie(req, '', 0)
   ]);
@@ -1038,8 +1126,9 @@ app.post('/api/security/verifyPin', async (req: Request, res: Response) => {
       resetBucket('pin', ip);
 
       const rawSessionId = `admin_${crypto.randomBytes(32).toString('hex')}`;
+      const issuedAt = Date.now();
       const fiveDaysMs = 5 * 24 * 60 * 60 * 1000;
-      const expiresAt = Date.now() + fiveDaysMs;
+      const expiresAt = issuedAt + fiveDaysMs;
 
       activeSessions.set(rawSessionId, {
         email: OWNER_EMAIL,
@@ -1048,10 +1137,10 @@ app.post('/api/security/verifyPin', async (req: Request, res: Response) => {
         expiresAt,
         ip,
         userAgent: req.headers['user-agent'] || 'Browser',
-        createdAt: new Date().toISOString()
+        createdAt: new Date(issuedAt).toISOString()
       });
 
-      const signedCookie = signSessionId(rawSessionId);
+      const signedCookie = signSessionId(rawSessionId, issuedAt, expiresAt, true);
       res.setHeader('Set-Cookie', [
         buildSessionCookie(req, signedCookie, 5 * 24 * 3600)
       ]);
@@ -1266,19 +1355,12 @@ app.get('/api/security/systemStatus', (_req: Request, res: Response) => {
 // ==========================================
 
 function requireAdminAuth(req: Request, res: Response): { email: string } | null {
-  const cookies = parseCookies(req);
-  const cookieVal = cookies['__session'];
-  if (!cookieVal) {
-    res.status(401).json({ error: 'وصول مرفوض: جلسة مركز التحكم مطلوبة.' });
+  const session = resolveSessionRecord(req);
+  if (!session) {
+    res.status(401).json({ error: 'وصول مرفوض: جلسة مركز التحكم مطلوبة أو منتهية.' });
     return null;
   }
-  const rawSessionId = verifySignedSession(cookieVal);
-  if (!rawSessionId) {
-    res.status(401).json({ error: 'توقيع الجلسة غير صالح.' });
-    return null;
-  }
-  const session = activeSessions.get(rawSessionId);
-  if (!session || session.expiresAt < Date.now() || session.email !== OWNER_EMAIL || !session.owner || !session.codeVerified) {
+  if (session.email !== OWNER_EMAIL || !session.owner || !session.codeVerified) {
     res.status(403).json({ error: 'وصول غير مصرح به: صلاحيات مركز التحكم مطلوبة.' });
     return null;
   }

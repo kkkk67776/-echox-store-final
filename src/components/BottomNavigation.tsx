@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Home, LayoutGrid, Search, ShoppingBag, X, ChevronLeft, ArrowRight, Sparkles, TrendingUp, Star } from 'lucide-react';
+import { Home, LayoutGrid, Search, ShoppingBag, X, ChevronLeft, ArrowRight, Sparkles, TrendingUp, Star, AlertTriangle } from 'lucide-react';
 import { useStore } from '../context/StoreContext';
 import { Product } from '../types';
 import { verifyAccessCodeServer } from '../lib/security';
@@ -29,6 +29,8 @@ export const BottomNavigation: React.FC<BottomNavigationProps> = ({ onOpenVault 
   const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
   const [localSearchInput, setLocalSearchInput] = useState('');
   const [searchResults, setSearchResults] = useState<Product[]>([]);
+  const [isCheckingVault, setIsCheckingVault] = useState(false);
+  const [vaultError, setVaultError] = useState('');
   const accessCheckTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -39,21 +41,45 @@ export const BottomNavigation: React.FC<BottomNavigationProps> = ({ onOpenVault 
 
   const totalCartItems = cart.reduce((sum, item) => sum + item.quantity, 0);
 
-  const runAccessCodeVerification = async (candidate: string) => {
+  const runAccessCodeVerification = async (candidate: string, explicitSubmit: boolean = false) => {
     const clean = candidate.trim();
-    if (clean.length < 4 || (!clean.startsWith('#') && clean.length < 8)) return;
+    if (clean.length < 4) return;
+    if (!explicitSubmit && !clean.startsWith('#') && clean.length < 8) return;
+
+    setIsCheckingVault(true);
+    setVaultError('');
     try {
       const check = await verifyAccessCodeServer(clean);
       if (check.success) {
         setLocalSearchInput('');
         setSearchQuery('');
         setSearchResults([]);
+        setVaultError('');
         setIsSearchModalOpen(false);
+        (window as any).__echoxVaultOpenPending = true;
         if (onOpenVault) onOpenVault();
         window.dispatchEvent(new CustomEvent('open_echox_vault'));
+        return;
+      }
+
+      const isServiceOrRateIssue =
+        check.httpStatus === 503 ||
+        check.httpStatus === 502 ||
+        check.httpStatus === 500 ||
+        check.httpStatus === 429 ||
+        check.httpStatus === 0 ||
+        Boolean(check.lockedOut);
+
+      if (isServiceOrRateIssue || (explicitSubmit && clean.startsWith('#'))) {
+        setVaultError(check.error || 'تعذر التحقق من رمز الوصول حالياً.');
       }
     } catch (err) {
       console.warn('Access code check notice in bottom nav:', err);
+      if (explicitSubmit || clean.startsWith('#')) {
+        setVaultError('تعذر الاتصال بالخادم للتحقق من رمز الوصول.');
+      }
+    } finally {
+      setIsCheckingVault(false);
     }
   };
 
@@ -61,6 +87,7 @@ export const BottomNavigation: React.FC<BottomNavigationProps> = ({ onOpenVault 
     const val = e.target.value;
     setLocalSearchInput(val);
     setSearchQuery(val);
+    if (vaultError) setVaultError('');
 
     if (accessCheckTimerRef.current) clearTimeout(accessCheckTimerRef.current);
 
@@ -69,7 +96,7 @@ export const BottomNavigation: React.FC<BottomNavigationProps> = ({ onOpenVault 
       const trimmed = val.trim();
       if (trimmed.startsWith('#') || trimmed.length >= 8) {
         accessCheckTimerRef.current = setTimeout(() => {
-          runAccessCodeVerification(trimmed);
+          runAccessCodeVerification(trimmed, false);
         }, 500);
       }
 
@@ -187,6 +214,7 @@ export const BottomNavigation: React.FC<BottomNavigationProps> = ({ onOpenVault 
                 setIsSearchModalOpen(false);
                 setLocalSearchInput('');
                 setSearchResults([]);
+                setVaultError('');
               }}
               className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 text-[#0F172A] dark:text-slate-200 transition-colors cursor-pointer shrink-0"
               title="رجوع"
@@ -195,18 +223,20 @@ export const BottomNavigation: React.FC<BottomNavigationProps> = ({ onOpenVault 
             </button>
 
             {/* حقل البحث الكبسولي */}
-            <div className="flex-1 relative flex items-center bg-[#F8FAFC] dark:bg-[#1E293B] border border-[#E2E8F0] dark:border-slate-700 focus-within:border-[#FF6B00] dark:focus-within:border-[#FF6B00] focus-within:bg-white dark:focus-within:bg-[#0F172A] rounded-full py-2 px-3.5 transition-all shadow-inner">
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (accessCheckTimerRef.current) clearTimeout(accessCheckTimerRef.current);
+                runAccessCodeVerification(localSearchInput, true);
+              }}
+              className="flex-1 relative flex items-center bg-[#F8FAFC] dark:bg-[#1E293B] border border-[#E2E8F0] dark:border-slate-700 focus-within:border-[#FF6B00] dark:focus-within:border-[#FF6B00] focus-within:bg-white dark:focus-within:bg-[#0F172A] rounded-full py-2 px-3.5 transition-all shadow-inner"
+            >
               <Search className="w-4 h-4 text-slate-400 ml-2 shrink-0" />
               <input
-                type="text"
+                type="search"
+                enterKeyHint="search"
                 value={localSearchInput}
                 onChange={handleSearchChange}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    if (accessCheckTimerRef.current) clearTimeout(accessCheckTimerRef.current);
-                    runAccessCodeVerification(localSearchInput);
-                  }
-                }}
                 autoFocus
                 placeholder={t.bottomNav?.searchPlaceholder || 'ابحث في المعدات والأجهزة وقطع الغيار...'}
                 className="w-full bg-transparent text-xs sm:text-sm text-[#0F172A] dark:text-white placeholder-slate-400 dark:placeholder-slate-500 outline-none"
@@ -218,17 +248,32 @@ export const BottomNavigation: React.FC<BottomNavigationProps> = ({ onOpenVault 
                     setLocalSearchInput('');
                     setSearchQuery('');
                     setSearchResults([]);
+                    setVaultError('');
                   }}
                   className="p-1 text-slate-400 hover:text-[#0F172A] dark:hover:text-white rounded-full"
                 >
                   <X className="w-4 h-4" />
                 </button>
               )}
-            </div>
+            </form>
           </div>
 
           {/* Search Content */}
           <div className="flex-1 overflow-y-auto p-4 space-y-5">
+            {isCheckingVault && localSearchInput.trim().startsWith('#') && (
+              <div className="p-3 rounded-2xl bg-[#FF6B00]/10 border border-[#FF6B00]/30 text-xs font-bold text-[#FF6B00] flex items-center gap-2">
+                <div className="w-3.5 h-3.5 border-2 border-[#FF6B00] border-t-transparent rounded-full animate-spin shrink-0" />
+                <span>جارٍ التحقق عبر الخادم...</span>
+              </div>
+            )}
+
+            {vaultError && (
+              <div className="p-3 rounded-2xl bg-red-500/10 border border-red-500/30 text-xs font-bold text-red-600 dark:text-red-400 flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                <span className="leading-relaxed">{vaultError}</span>
+              </div>
+            )}
+
             {/* عندما لا يوجد نص بحث: اعرض الاقتراحات الشائعة */}
             {!localSearchInput.trim() && (
               <div className="space-y-4">

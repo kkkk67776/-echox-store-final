@@ -18,9 +18,10 @@ const SESSION_DURATION = 15 * 60 * 1000;
 interface OwnerSecurityRoomProps {
   onUnlockSuccess?: () => void;
   onNavigate?: (route: string, state?: any) => void;
+  vaultOpenNonce?: number;
 }
 
-export default function OwnerSecurityRoom({ onUnlockSuccess, onNavigate }: OwnerSecurityRoomProps) {
+export default function OwnerSecurityRoom({ onUnlockSuccess, onNavigate, vaultOpenNonce = 0 }: OwnerSecurityRoomProps) {
   const [isUnlocked, setIsUnlocked] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
 
@@ -37,54 +38,8 @@ export default function OwnerSecurityRoom({ onUnlockSuccess, onNavigate }: Owner
   const [attempts, setAttempts] = useState(0);
   const [lockoutTime, setLockoutTime] = useState(0);
 
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.ctrlKey && e.shiftKey && (e.key === 'E' || e.key === 'e')) {
-        e.preventDefault();
-        openModal(false);
-      }
-    };
-    const handleOpenVaultEvent = () => {
-      openModal(false);
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('open_echox_vault', handleOpenVaultEvent);
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('open_echox_vault', handleOpenVaultEvent);
-    };
-  }, []);
-
-  useEffect(() => {
-    const encryptedSession = sessionStorage.getItem('echox_owner_session');
-    if (encryptedSession) {
-      try {
-        const parsed = JSON.parse(atob(encryptedSession));
-        if (parsed.unlocked && parsed.exp > Date.now()) {
-          setIsUnlocked(true);
-          setOwnerUnlocked(true);
-          setOwnerGoogleUser({
-            email: OWNER_EMAIL,
-            uid: 'sovereign_owner_uid_570',
-          });
-          if (onUnlockSuccess) onUnlockSuccess();
-          return;
-        }
-      } catch {
-        sessionStorage.removeItem('echox_owner_session');
-      }
-    }
-  }, [onUnlockSuccess]);
-
-  useEffect(() => {
-    if (lockoutTime <= 0) return;
-    const timer = setInterval(() => {
-      setLockoutTime((prev) => Math.max(0, prev - 1));
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [lockoutTime]);
-
   const openModal = (changeMode = false) => {
+    (window as any).__echoxVaultOpenPending = false;
     setIsModalOpen(true);
     setIsChangeMode(changeMode);
     setError('');
@@ -98,6 +53,76 @@ export default function OwnerSecurityRoom({ onUnlockSuccess, onNavigate }: Owner
       document.getElementById(firstInputId)?.focus();
     }, 150);
   };
+
+  useEffect(() => {
+    const encryptedSession = sessionStorage.getItem('echox_owner_session');
+    if (encryptedSession) {
+      try {
+        const parsed = JSON.parse(atob(encryptedSession));
+        if (parsed.unlocked && parsed.exp > Date.now()) {
+          setIsUnlocked(true);
+          setOwnerUnlocked(true);
+          setOwnerGoogleUser({
+            email: OWNER_EMAIL,
+            uid: 'sovereign_owner_uid_570',
+          });
+        } else {
+          sessionStorage.removeItem('echox_owner_session');
+        }
+      } catch {
+        sessionStorage.removeItem('echox_owner_session');
+      }
+    }
+
+    if ((window as any).__echoxVaultOpenPending) {
+      openModal(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (vaultOpenNonce > 0) {
+      if (isUnlocked) {
+        if (onUnlockSuccess) onUnlockSuccess();
+      } else {
+        openModal(false);
+      }
+    }
+  }, [vaultOpenNonce, isUnlocked]);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.shiftKey && (e.key === 'E' || e.key === 'e')) {
+        e.preventDefault();
+        if (isUnlocked) {
+          if (onUnlockSuccess) onUnlockSuccess();
+        } else {
+          openModal(false);
+        }
+      }
+    };
+    const handleOpenVaultEvent = () => {
+      if (isUnlocked) {
+        (window as any).__echoxVaultOpenPending = false;
+        if (onUnlockSuccess) onUnlockSuccess();
+      } else {
+        openModal(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('open_echox_vault', handleOpenVaultEvent);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('open_echox_vault', handleOpenVaultEvent);
+    };
+  }, [isUnlocked, onUnlockSuccess]);
+
+  useEffect(() => {
+    if (lockoutTime <= 0) return;
+    const timer = setInterval(() => {
+      setLockoutTime((prev) => Math.max(0, prev - 1));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [lockoutTime]);
 
   const sendEmailAlert = (type: string, details: string = '') => {
     if (
@@ -267,6 +292,14 @@ export default function OwnerSecurityRoom({ onUnlockSuccess, onNavigate }: Owner
     setIsModalOpen(false);
     sessionStorage.removeItem('echox_owner_session');
     setOwnerUnlocked(false);
+    fetch('/api/owner/logout', { method: 'POST', credentials: 'same-origin' }).catch(() => {});
+    if (window.location.pathname.startsWith('/owner')) {
+      if (onNavigate) {
+        onNavigate('/');
+      } else {
+        window.location.href = '/';
+      }
+    }
   };
 
   const handleGoToDashboard = () => {

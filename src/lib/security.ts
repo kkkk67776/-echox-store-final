@@ -374,10 +374,10 @@ export async function createOwnerSessionCall(email: string, customToken?: string
 
 export async function checkServerSession() {
   try {
-    const res = await fetch('/api/owner/me', { credentials: 'same-origin' });
+    const res = await fetch('/api/owner/me', { credentials: 'same-origin', cache: 'no-store' });
     if (!res.ok) return false;
     const data = await res.json();
-    return data.authenticated === true && data.owner === true;
+    return data.authenticated === true && data.owner === true && data.codeVerified === true;
   } catch {
     return false;
   }
@@ -412,11 +412,22 @@ export async function getSecurityStatusCall() {
 // 🛡️ SERVER-SIDE ARGON2ID SECURITY CLIENT APIS
 // ==========================================
 
+async function safeReadJson(res: Response): Promise<any> {
+  const text = await res.text();
+  if (!text) return {};
+  try {
+    return JSON.parse(text);
+  } catch {
+    return {};
+  }
+}
+
 export async function verifyAccessCodeServer(code: string): Promise<{
   success: boolean;
   lockedOut?: boolean;
   remainingSeconds?: number;
   attemptsLeft?: number;
+  httpStatus?: number;
   error?: string;
 }> {
   try {
@@ -424,13 +435,34 @@ export async function verifyAccessCodeServer(code: string): Promise<{
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'same-origin',
+      cache: 'no-store',
       body: JSON.stringify({ code: code.trim() })
     });
-    const data = await res.json();
-    return data;
+    const data = await safeReadJson(res);
+    if (res.status === 503) {
+      return {
+        success: false,
+        httpStatus: 503,
+        error:
+          data.error ||
+          'خدمة التحقق الخادمية غير مربوطة في بيئة النشر (BACKEND_ORIGIN غير مضبوط في إعدادات Cloudflare Pages).'
+      };
+    }
+    if (res.status >= 500) {
+      return {
+        success: false,
+        httpStatus: res.status,
+        error: data.error || 'تعذر الاتصال بخادم التحقق الخلفي حالياً، يرجى المحاولة بعد لحظات.'
+      };
+    }
+    return {
+      ...data,
+      success: Boolean(data.success),
+      httpStatus: res.status
+    };
   } catch (err) {
     console.warn('[Security] verifyAccessCodeServer notice:', err);
-    return { success: false, error: 'فشل الاتصال بالخادم لفحص رمز الوصول.' };
+    return { success: false, httpStatus: 0, error: 'فشل الاتصال بالخادم لفحص رمز الوصول.' };
   }
 }
 
@@ -440,6 +472,7 @@ export async function verifyPinServer(pin: string): Promise<{
   lockedOut?: boolean;
   remainingSeconds?: number;
   attemptsLeft?: number;
+  httpStatus?: number;
   error?: string;
 }> {
   try {
@@ -447,16 +480,37 @@ export async function verifyPinServer(pin: string): Promise<{
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'same-origin',
+      cache: 'no-store',
       body: JSON.stringify({ pin: pin.trim() })
     });
-    const data = await res.json();
+    const data = await safeReadJson(res);
+    if (res.status === 503) {
+      return {
+        success: false,
+        httpStatus: 503,
+        error:
+          data.error ||
+          'خدمة التحقق الخادمية غير مربوطة في بيئة النشر (BACKEND_ORIGIN غير مضبوط في إعدادات Cloudflare Pages).'
+      };
+    }
+    if (res.status >= 500) {
+      return {
+        success: false,
+        httpStatus: res.status,
+        error: data.error || 'تعذر الاتصال بخادم التحقق الخلفي حالياً، يرجى المحاولة بعد لحظات.'
+      };
+    }
     if (data.success) {
       setOwnerUnlocked(true);
     }
-    return data;
+    return {
+      ...data,
+      success: Boolean(data.success),
+      httpStatus: res.status
+    };
   } catch (err) {
     console.warn('[Security] verifyPinServer notice:', err);
-    return { success: false, error: 'فشل الاتصال بالخادم للتحقق من PIN.' };
+    return { success: false, httpStatus: 0, error: 'فشل الاتصال بالخادم للتحقق من PIN.' };
   }
 }
 

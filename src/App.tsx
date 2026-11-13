@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, Suspense, lazy } from 'react';
+import React, { useState, useEffect, useCallback, Suspense, lazy } from 'react';
 import { StoreProvider, useStore } from './context/StoreContext';
 import { Header } from './components/Header';
 import { StorefrontView } from './components/StorefrontView';
@@ -12,6 +12,7 @@ import { CartDrawer } from './components/CartDrawer';
 import { FloatingActions } from './components/FloatingActions';
 import { Footer } from './components/Footer';
 import { BottomNavigation } from './components/BottomNavigation';
+import OwnerSecurityRoom from './components/security/OwnerSecurityRoom';
 import { applySeo } from './lib/seo';
 
 const CheckoutModal = lazy(() => import('./components/CheckoutModal').then(m => ({ default: m.CheckoutModal })));
@@ -19,7 +20,6 @@ const SupportEchoxModal = lazy(() => import('./components/SupportEchoxModal').th
 const OrderTrackingView = lazy(() => import('./components/OrderTrackingView').then(m => ({ default: m.OrderTrackingView })));
 const CustomerPortal = lazy(() => import('./components/CustomerPortal').then(m => ({ default: m.CustomerPortal })));
 const OwnerDashboard = lazy(() => import('./components/OwnerDashboard').then(m => ({ default: m.OwnerDashboard })));
-const OwnerSecurityRoom = lazy(() => import('./components/security/OwnerSecurityRoom'));
 const PromiseView = lazy(() => import('./components/StaticPages').then(m => ({ default: m.PromiseView })));
 const CompaniesView = lazy(() => import('./components/StaticPages').then(m => ({ default: m.CompaniesView })));
 const ContactView = lazy(() => import('./components/StaticPages').then(m => ({ default: m.ContactView })));
@@ -29,6 +29,38 @@ const RouteFallback: React.FC = () => (
     <div className="w-8 h-8 rounded-full border-3 border-[#FF6B00]/25 border-t-[#FF6B00] animate-spin" />
   </div>
 );
+
+class RouteErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { hasError: boolean }
+> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false };
+  }
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-[50vh] flex flex-col items-center justify-center p-6 text-center space-y-3">
+          <p className="text-sm font-bold text-slate-700 dark:text-slate-200">
+            تعذر تحميل هذه الصفحة. يرجى تحديث الصفحة والمحاولة مجدداً.
+          </p>
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="px-4 py-2 rounded-xl bg-[#FF6B00] text-white text-xs font-bold cursor-pointer"
+          >
+            إعادة تحميل الصفحة
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 const AppContent: React.FC = () => {
   const {
@@ -40,14 +72,29 @@ const AppContent: React.FC = () => {
     selectedProductId,
     setSelectedProductId,
     setSelectedCategory,
+    setSearchQuery,
   } = useStore();
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
   const [navState, setNavState] = useState<{ challengeId?: string; devTestHint?: string }>({});
+  const [vaultOpenNonce, setVaultOpenNonce] = useState(0);
 
-  // Synchronize route & query parameters (?product, ?category, ?lang) with browser URL
+  const requestOpenVault = useCallback(() => {
+    (window as any).__echoxVaultOpenPending = true;
+    setVaultOpenNonce((prev) => prev + 1);
+  }, []);
+
+  useEffect(() => {
+    const handleGlobalVaultEvent = () => {
+      setVaultOpenNonce((prev) => prev + 1);
+    };
+    window.addEventListener('open_echox_vault', handleGlobalVaultEvent);
+    return () => window.removeEventListener('open_echox_vault', handleGlobalVaultEvent);
+  }, []);
+
+  // Synchronize route & query parameters (?product, ?category, ?lang, ?search) with browser URL
   useEffect(() => {
     const syncRouteFromUrl = () => {
-      const path = window.location.pathname;
+      const path = window.location.pathname.replace(/\/+$/, '') || '/';
       const params = new URLSearchParams(window.location.search);
 
       const urlLang = params.get('lang');
@@ -65,14 +112,17 @@ const AppContent: React.FC = () => {
         setSelectedProductId(urlProduct);
       }
 
+      const urlSearch = params.get('search');
+      if (urlSearch) {
+        setSearchQuery(urlSearch);
+      }
+
       if (path === '/owner/dashboard' || path === '/owner_dashboard') {
         setCurrentView('/owner/dashboard');
       } else if (path === '/owner/login' || path === '/owner/lock' || path === '/owner/security-code') {
         window.history.replaceState({}, '', '/');
         setCurrentView('store');
-        setTimeout(() => {
-          window.dispatchEvent(new CustomEvent('open_echox_vault'));
-        }, 100);
+        requestOpenVault();
       } else if (path === '/promise') {
         setCurrentView('promise');
       } else if (path === '/companies') {
@@ -85,13 +135,15 @@ const AppContent: React.FC = () => {
         setCurrentView('wishlist');
       } else if (path === '/contact') {
         setCurrentView('contact');
+      } else {
+        setCurrentView('store');
       }
     };
 
     syncRouteFromUrl();
     window.addEventListener('popstate', syncRouteFromUrl);
     return () => window.removeEventListener('popstate', syncRouteFromUrl);
-  }, [setCurrentView, setLanguage, setSelectedCategory, setSelectedProductId]);
+  }, [setCurrentView, setLanguage, setSelectedCategory, setSelectedProductId, setSearchQuery, requestOpenVault]);
 
   const activeProduct = products.find((p) => p.id === selectedProductId) || null;
 
@@ -100,17 +152,17 @@ const AppContent: React.FC = () => {
     applySeo(currentView, language, activeProduct);
   }, [currentView, language, activeProduct]);
 
-  const handleNavigate = (route: string, state?: any) => {
+  const handleNavigate = useCallback((route: string, state?: any) => {
     if (state) {
       setNavState(state);
     }
-    const urlPath = route.startsWith('/') ? route : `/${route}`;
+    const urlPath = route === 'store' ? '/' : route.startsWith('/') ? route : `/${route}`;
     if (window.location.pathname !== urlPath) {
       window.history.pushState(state || {}, '', urlPath);
     }
     setCurrentView(route);
     window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
+  }, [setCurrentView]);
 
   const isOwnerRoute =
     currentView === '/owner/dashboard' ||
@@ -123,22 +175,24 @@ const AppContent: React.FC = () => {
 
       {/* 2. Main View Router */}
       <main className="flex-1 w-full max-w-full overflow-x-hidden">
-        <Suspense fallback={<RouteFallback />}>
-          {isOwnerRoute && (
-            <OwnerDashboard onNavigate={handleNavigate} />
-          )}
+        <RouteErrorBoundary>
+          <Suspense fallback={<RouteFallback />}>
+            {isOwnerRoute && (
+              <OwnerDashboard onNavigate={handleNavigate} />
+            )}
 
-          {!isOwnerRoute && (
-            <>
-              {(currentView === 'store' || currentView === '/') && <StorefrontView />}
-              {currentView === 'promise' && <PromiseView />}
-              {currentView === 'companies' && <CompaniesView />}
-              {currentView === 'my_orders' && <OrderTrackingView />}
-              {(currentView === 'account' || currentView === 'wishlist') && <CustomerPortal />}
-              {currentView === 'contact' && <ContactView />}
-            </>
-          )}
-        </Suspense>
+            {!isOwnerRoute && (
+              <>
+                {(currentView === 'store' || currentView === '/') && <StorefrontView />}
+                {currentView === 'promise' && <PromiseView />}
+                {currentView === 'companies' && <CompaniesView />}
+                {currentView === 'my_orders' && <OrderTrackingView />}
+                {(currentView === 'account' || currentView === 'wishlist') && <CustomerPortal />}
+                {currentView === 'contact' && <ContactView />}
+              </>
+            )}
+          </Suspense>
+        </RouteErrorBoundary>
       </main>
 
       {/* 3. Global Drawers & Modals */}
@@ -149,11 +203,12 @@ const AppContent: React.FC = () => {
           <CheckoutModal isOpen={isCheckoutOpen} onClose={() => setIsCheckoutOpen(false)} />
         )}
         <SupportEchoxModal />
-        <OwnerSecurityRoom
-          onUnlockSuccess={() => handleNavigate('/owner/dashboard')}
-          onNavigate={handleNavigate}
-        />
       </Suspense>
+      <OwnerSecurityRoom
+        vaultOpenNonce={vaultOpenNonce}
+        onUnlockSuccess={() => handleNavigate('/owner/dashboard')}
+        onNavigate={handleNavigate}
+      />
 
       {/* 4. Floating Communication Buttons */}
       <FloatingActions />
@@ -162,7 +217,7 @@ const AppContent: React.FC = () => {
       <Footer />
 
       {/* 6. Google Play Fixed Bottom Navigation Bar */}
-      {!isOwnerRoute && <BottomNavigation />}
+      {!isOwnerRoute && <BottomNavigation onOpenVault={requestOpenVault} />}
     </div>
   );
 };
