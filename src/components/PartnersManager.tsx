@@ -73,7 +73,7 @@ export default function PartnersManager() {
   const handleAddPartner = (e: React.FormEvent) => {
     e.preventDefault();
     if (!name || !phone) {
-      alert('يرجى ملء اسم الشركة ورقم الهاتف على الأقل');
+      setSuccessMsg('يرجى ملء اسم الشركة ورقم الهاتف على الأقل');
       return;
     }
 

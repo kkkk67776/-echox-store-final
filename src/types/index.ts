@@ -168,6 +168,10 @@ export interface BankTransferPublicConfig {
   ibanOrRib: string;
   swiftCode?: string;
   instructions: MultilingualText;
+  integrityVerified?: boolean;
+  lockedByEnv?: boolean;
+  tamperDetected?: boolean;
+  ibanFingerprint?: string;
 }
 
 export interface OnlineGatewayPublicConfig {
@@ -305,11 +309,47 @@ export interface ContactInquiry {
   repliedAt?: string;
 }
 
+export interface ChatSuggestedProduct {
+  id: string;
+  name: string;
+  price: number;
+  image?: string;
+}
+
 export interface ChatMessage {
   id: string;
   sender: 'customer' | 'owner';
   text: string;
   timestamp: string;
+  source?: 'auto' | 'owner' | 'customer';
+  suggestedProducts?: ChatSuggestedProduct[];
+  actionView?: string;
+}
+
+export interface CustomChatRule {
+  id: string;
+  keyword: string;
+  replyAr: string;
+  replyFr: string;
+  replyEn: string;
+}
+
+export interface SupportChatConfig {
+  autoReplyEnabled: boolean;
+  welcomeMessage: MultilingualText;
+  fallbackMessage: MultilingualText;
+  customRules: CustomChatRule[];
+  updatedAt: string;
+}
+
+export interface SupportChatThread {
+  sessionId: string;
+  customerLabel: string;
+  language: Language;
+  messages: ChatMessage[];
+  unreadByOwner: number;
+  lastMessageAt: string;
+  createdAt: string;
 }
 
 export interface OwnerSettings {

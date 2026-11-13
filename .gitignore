@@ -4,5 +4,12 @@ dist/
 coverage/
 .DS_Store
 *.log
+*.tmp
 .env*
 !.env.example
+payment_system_data.json
+central_security_config.json
+sovereign_security.json
+owner_lock_config.json
+support_chat_data.json
+.hmac_secret

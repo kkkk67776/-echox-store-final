@@ -104,6 +104,7 @@ export const PaymentManagementTab: React.FC = () => {
   const [apiKeyInput, setApiKeyInput] = useState('');
   const [walletIdInput, setWalletIdInput] = useState('');
   const [webhookSecretInput, setWebhookSecretInput] = useState('');
+  const [bankConfirmPin, setBankConfirmPin] = useState('');
 
   const [savingConfig, setSavingConfig] = useState(false);
   const [testingGateway, setTestingGateway] = useState(false);
@@ -209,6 +210,28 @@ export const PaymentManagementTab: React.FC = () => {
     if (walletIdInput.trim()) payload.onlinePayment.walletId = walletIdInput.trim();
     if (webhookSecretInput.trim()) payload.onlinePayment.webhookSecret = webhookSecretInput.trim();
 
+    const bankMeta = overview?.config?.methods?.bank_transfer || paymentConfig.methods.bank_transfer;
+    const bankChanged =
+      bankHolder.trim() !== (bankMeta.accountHolder || '').trim() ||
+      bankName.trim() !== (bankMeta.bankName || '').trim() ||
+      bankIban.trim() !== (bankMeta.ibanOrRib || '').trim() ||
+      bankSwift.trim() !== (bankMeta.swiftCode || '').trim() ||
+      Boolean(bankMeta.tamperDetected && bankEnabled);
+
+    if (bankChanged) {
+      if (bankMeta.lockedByEnv) {
+        setSavingConfig(false);
+        showBanner('err', 'الحساب البنكي مقفول عبر متغير البيئة LOCKED_BANK_IBAN ولا يمكن تغييره من لوحة التحكم.');
+        return;
+      }
+      if (!bankConfirmPin.trim()) {
+        setSavingConfig(false);
+        showBanner('err', 'لحماية حسابك البنكي من الاختراق، يرجى إدخال رمز الـ PIN الأمني لتأكيد التعديل.');
+        return;
+      }
+      payload.confirmPin = bankConfirmPin.trim();
+    }
+
     const res = await saveAdminPaymentConfig(payload);
     setSavingConfig(false);
 
@@ -221,6 +244,7 @@ export const PaymentManagementTab: React.FC = () => {
     setApiKeyInput('');
     setWalletIdInput('');
     setWebhookSecretInput('');
+    setBankConfirmPin('');
 
     // Keep SiteSettings shipping & bank flag aligned
     updateSiteSettings({
@@ -614,13 +638,36 @@ export const PaymentManagementTab: React.FC = () => {
 
           {/* 2. Bank Transfer Configuration */}
           <div className="p-4 sm:p-5 rounded-3xl bg-[#F8FAFC] dark:bg-[#1E293B] border border-[#E2E8F0] dark:border-slate-800 space-y-4">
-            <div className="flex items-center justify-between gap-4">
+            <div className="flex items-center justify-between flex-wrap gap-3">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-2xl bg-[#FF6B00]/10 text-[#FF6B00] flex items-center justify-center shrink-0">
                   <Building2 className="w-5 h-5" />
                 </div>
                 <div>
-                  <h4 className="text-xs sm:text-sm font-black">{t.payments.bankTransferLabel}</h4>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h4 className="text-xs sm:text-sm font-black">{t.payments.bankTransferLabel}</h4>
+                    {currentCfg.methods.bank_transfer.lockedByEnv ? (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
+                        <Lock className="w-3 h-3" />
+                        <span>مقفول عبر الخادم (LOCKED_BANK_IBAN)</span>
+                      </span>
+                    ) : currentCfg.methods.bank_transfer.tamperDetected ? (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-500/15 text-red-700 dark:text-red-400 border border-red-500/30 flex items-center gap-1">
+                        <AlertTriangle className="w-3 h-3" />
+                        <span>تنبيه تلاعب: تم تعليق التحويلات تلقائياً</span>
+                      </span>
+                    ) : (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
+                        <ShieldCheck className="w-3 h-3" />
+                        <span>محمي بختم HMAC + تأكيد PIN</span>
+                      </span>
+                    )}
+                    {currentCfg.methods.bank_transfer.ibanFingerprint && (
+                      <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-slate-200/70 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                        بصمة الحساب: {currentCfg.methods.bank_transfer.ibanFingerprint}
+                      </span>
+                    )}
+                  </div>
                   <p className="text-[11px] text-slate-500 dark:text-slate-400">
                     {t.payments.bankTransferDesc}
                   </p>
@@ -637,14 +684,21 @@ export const PaymentManagementTab: React.FC = () => {
               </label>
             </div>
 
+            {currentCfg.methods.bank_transfer.tamperDetected && (
+              <div className="p-3 rounded-2xl bg-red-500/10 border border-red-500/30 text-[11px] font-bold text-red-700 dark:text-red-300">
+                اكتشف النظام تعديلاً غير مصرح به على بيانات الحساب البنكي خارج مركز التحكم، ولحماية أموالك تم إيقاف عرض الحساب تلقائياً. أعد إدخال حسابك الصحيح مع رمز الـ PIN الأمني ثم احفظ التغييرات لاستعادة التفعيل.
+              </div>
+            )}
+
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-slate-200 dark:border-slate-700">
               <div>
                 <label className="text-[11px] font-bold block mb-1">{t.payments.beneficiary}</label>
                 <input
                   type="text"
                   value={bankHolder}
+                  disabled={Boolean(currentCfg.methods.bank_transfer.lockedByEnv)}
                   onChange={(e) => setBankHolder(e.target.value)}
-                  className="w-full text-xs py-2 px-3 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-[#0F172A]"
+                  className="w-full text-xs py-2 px-3 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-[#0F172A] disabled:opacity-60"
                 />
               </div>
 
@@ -653,8 +707,9 @@ export const PaymentManagementTab: React.FC = () => {
                 <input
                   type="text"
                   value={bankName}
+                  disabled={Boolean(currentCfg.methods.bank_transfer.lockedByEnv)}
                   onChange={(e) => setBankName(e.target.value)}
-                  className="w-full text-xs py-2 px-3 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-[#0F172A]"
+                  className="w-full text-xs py-2 px-3 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-[#0F172A] disabled:opacity-60"
                 />
               </div>
 
@@ -663,9 +718,10 @@ export const PaymentManagementTab: React.FC = () => {
                 <input
                   type="text"
                   value={bankIban}
+                  disabled={Boolean(currentCfg.methods.bank_transfer.lockedByEnv)}
                   onChange={(e) => setBankIban(e.target.value)}
                   dir="ltr"
-                  className="w-full text-xs py-2 px-3 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-[#0F172A] font-mono"
+                  className="w-full text-xs py-2 px-3 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-[#0F172A] font-mono disabled:opacity-60"
                 />
               </div>
 
@@ -674,12 +730,38 @@ export const PaymentManagementTab: React.FC = () => {
                 <input
                   type="text"
                   value={bankSwift}
+                  disabled={Boolean(currentCfg.methods.bank_transfer.lockedByEnv)}
                   onChange={(e) => setBankSwift(e.target.value)}
                   dir="ltr"
-                  className="w-full text-xs py-2 px-3 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-[#0F172A] font-mono"
+                  className="w-full text-xs py-2 px-3 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-[#0F172A] font-mono disabled:opacity-60"
                 />
               </div>
             </div>
+
+            {!currentCfg.methods.bank_transfer.lockedByEnv && (
+              bankHolder.trim() !== (currentCfg.methods.bank_transfer.accountHolder || '').trim() ||
+              bankName.trim() !== (currentCfg.methods.bank_transfer.bankName || '').trim() ||
+              bankIban.trim() !== (currentCfg.methods.bank_transfer.ibanOrRib || '').trim() ||
+              bankSwift.trim() !== (currentCfg.methods.bank_transfer.swiftCode || '').trim() ||
+              currentCfg.methods.bank_transfer.tamperDetected
+            ) && (
+              <div className="p-3 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="text-xs font-bold text-amber-800 dark:text-amber-300 flex items-center gap-2">
+                  <Lock className="w-4 h-4 shrink-0" />
+                  <span>تحقق أمني إضافي: أدخل رمز الـ PIN الخاص بمركز التحكم لتأكيد تغيير الحساب البنكي</span>
+                </div>
+                <input
+                  type="password"
+                  inputMode="numeric"
+                  maxLength={12}
+                  value={bankConfirmPin}
+                  onChange={(e) => setBankConfirmPin(e.target.value)}
+                  placeholder="أدخل رمز PIN للتأكيد"
+                  dir="ltr"
+                  className="sm:w-48 text-xs py-2 px-3 rounded-xl border border-amber-400 dark:border-amber-600 bg-white dark:bg-[#0F172A] font-mono font-bold text-center"
+                />
+              </div>
+            )}
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>

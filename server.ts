@@ -22,7 +22,30 @@ import {
   handlePaymentWebhook,
   createSupportContribution,
   adminVerifySupportTransaction,
+  hydratePaymentDbFromCloud,
+  getActiveCatalogProductIds,
+  isBankIdentityChange,
+  isEnvLockedBank,
 } from './server/paymentEngine';
+import {
+  atomicWriteJsonSync,
+  flushCloudWrites,
+  getDataFilePath,
+  isCloudPersistenceEnabled,
+  loadCloudJson,
+  pushCloudJson,
+} from './server/cloudPersistence';
+import {
+  adminSendChatReply,
+  deleteChatThread,
+  getChatThread,
+  getPublicChatConfig,
+  hydrateChatDbFromCloud,
+  listAdminChatThreads,
+  markThreadReadByOwner,
+  recordCustomerChatExchange,
+  updateChatConfig,
+} from './server/chatEngine';
 
 dotenv.config();
 
@@ -35,9 +58,26 @@ if (process.env.VITE_FIREBASE_MEASUREMENT_ID === 'VITE_FIREBASE_API_KEY') {
 }
 
 const app = express();
+app.set('trust proxy', 1);
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
 app.use(express.json({ limit: '6mb' }));
+
+function isHttpsRequest(req: Request): boolean {
+  const proto = (req.headers['x-forwarded-proto'] as string) || '';
+  return req.secure || proto.split(',')[0].trim().toLowerCase() === 'https';
+}
+
+function buildSessionCookie(req: Request, value: string, maxAgeSeconds: number): string {
+  const secureFlag = isHttpsRequest(req) ? '; Secure' : '';
+  return `__session=${value}; Path=/; Max-Age=${maxAgeSeconds}; SameSite=Lax; HttpOnly${secureFlag}`;
+}
+
+function getClientIp(req: Request): string {
+  const fwd = (req.headers['x-forwarded-for'] as string) || '';
+  const first = fwd.split(',')[0].trim();
+  return first || req.ip || req.socket.remoteAddress || '127.0.0.1';
+}
 
 function getRequestOrigin(req: Request): string {
   const configured = (process.env.SITE_URL || process.env.VITE_SITE_URL || '').trim().replace(/\/$/, '');
@@ -62,30 +102,14 @@ function escapeXml(str: string): string {
 }
 
 function getDynamicCatalogProductIds(): string[] {
-  const fallbackIds = ['prod_titan_drill', 'prod_aether_headlight', 'prod_fluke_multimeter'];
-  try {
-    const paymentDbPath = path.resolve(process.cwd(), 'payment_system_data.json');
-    if (fs.existsSync(paymentDbPath)) {
-      const data = JSON.parse(fs.readFileSync(paymentDbPath, 'utf-8'));
-      if (data?.catalog && typeof data.catalog === 'object') {
-        const activeIds = Object.values(data.catalog as Record<string, { id?: string; active?: boolean }>)
-          .filter((item) => item && item.id && item.active !== false)
-          .map((item) => String(item.id));
-        if (activeIds.length > 0) {
-          return Array.from(new Set([...fallbackIds, ...activeIds]));
-        }
-      }
-    }
-  } catch {
-    // Fallback gracefully to core catalog IDs
-  }
-  return fallbackIds;
+  return getActiveCatalogProductIds();
 }
 
-// Security & SEO indexing headers middleware for private, admin, and API routes
+// Security & SEO indexing headers middleware (compatible with iframe previews and Google Auth popups)
 app.use((req: Request, res: Response, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
   const p = req.path.toLowerCase();
   if (
     p.startsWith('/owner') ||
@@ -98,6 +122,19 @@ app.use((req: Request, res: Response, next) => {
     res.setHeader('X-Robots-Tag', 'noindex, nofollow');
   }
   next();
+});
+
+// Infrastructure health check endpoint
+app.get('/api/health', (_req: Request, res: Response) => {
+  res.setHeader('Cache-Control', 'no-store');
+  return res.json({
+    status: 'ok',
+    service: 'echox-store-api',
+    uptimeSeconds: Math.floor(process.uptime()),
+    storageMode: isCloudPersistenceEnabled() ? 'upstash-redis+local-atomic' : 'local-atomic-disk',
+    securityEngine: 'Argon2id + HMAC-SHA256',
+    timestamp: new Date().toISOString(),
+  });
 });
 
 // Google Search Console HTML file verification handler
@@ -182,45 +219,119 @@ ${entries}
 `);
 });
 
-// Sovereign Security Config
-const OWNER_EMAIL = 'abdelkaderbahri570@gmail.com';
-const OWNER_PHONE_E164 = '+21621511162';
-const HMAC_SECRET = process.env.ECHOX_SECURITY_HMAC_SECRET || 'echox_sovereign_570_tunisia_armor_hmac_key_2026';
+// Sovereign Security Config (zero plaintext secrets or default codes in source)
+const OWNER_EMAIL = (process.env.ECHOX_OWNER_EMAIL || 'abdelkaderbahri570@gmail.com').trim().toLowerCase();
 
-// Persistent Sovereign Master Security Code (Default: "570216")
-const SECURITY_FILE = path.resolve(process.cwd(), 'sovereign_security.json');
+function loadOrCreateHmacSecret(): string {
+  const fromEnv = (process.env.ECHOX_SECURITY_HMAC_SECRET || '').trim();
+  if (fromEnv.length >= 16) return fromEnv;
 
-function hashSecurityCode(code: string, salt: string): string {
-  return crypto.createHash('sha256').update(`${salt}:${code.trim()}:${HMAC_SECRET}`).digest('hex');
-}
-
-function loadSecurityConfig(): { salt: string; hash: string } {
+  const secretFile = getDataFilePath('.hmac_secret');
   try {
-    if (fs.existsSync(SECURITY_FILE)) {
-      const data = JSON.parse(fs.readFileSync(SECURITY_FILE, 'utf-8'));
-      if (data.salt && data.hash) return data;
+    if (fs.existsSync(secretFile)) {
+      const stored = fs.readFileSync(secretFile, 'utf-8').trim();
+      if (stored.length >= 32) return stored;
     }
-  } catch (e) {
-    console.warn('[Security] Notice loading security file, initializing default:', e);
-  }
+  } catch {}
 
-  // Initialize with Sovereign Master Key: "570216"
-  const salt = crypto.randomBytes(16).toString('hex');
-  const hash = hashSecurityCode('570216', salt);
-  const cfg = { salt, hash };
+  const generated = crypto.randomBytes(48).toString('hex');
   try {
-    fs.writeFileSync(SECURITY_FILE, JSON.stringify(cfg, null, 2));
+    fs.writeFileSync(secretFile, generated, { encoding: 'utf-8', mode: 0o600 });
   } catch (err) {
-    console.warn('[Security] Notice writing security file:', err);
+    console.warn('[Security] Notice writing runtime HMAC key file:', err);
   }
-  return cfg;
+  if (process.env.NODE_ENV === 'production') {
+    console.warn('[Security] ECHOX_SECURITY_HMAC_SECRET env var not set; using locally generated secret.');
+  }
+  return generated;
 }
 
-let securityConfig = loadSecurityConfig();
+const HMAC_SECRET = loadOrCreateHmacSecret();
 
-// Brute-force protection for security code
-let failedCodeAttempts = 0;
-let codeLockoutUntil = 0;
+// Pre-computed one-way Argon2id bootstrap hashes (zero plaintext credentials stored in code)
+const DEFAULT_ACCESS_ARGON2 =
+  (process.env.ECHOX_BOOTSTRAP_ACCESS_HASH || '').trim() ||
+  '$argon2id$v=19$m=65536,t=3,p=4$L32cy6EOiWdqY6LxBDoknA$+xdvKFVg++rImusfx2U+XZKWvVIxHoIUEoyZL/vlpRw';
+const DEFAULT_PIN_ARGON2 =
+  (process.env.ECHOX_BOOTSTRAP_PIN_HASH || '').trim() ||
+  '$argon2id$v=19$m=65536,t=3,p=4$QRoTtDau0g/bydokawO6JA$nMAQe1UMgspWQ5Q4LRIzmoSwqLqENN34vKGiok8KGg0';
+
+// Per-IP Rate Limiter Store
+interface RateLimitBucket {
+  attempts: number;
+  lockoutUntil: number;
+  windowStart: number;
+  lastSeen: number;
+}
+
+const ipRateBuckets = new Map<string, RateLimitBucket>();
+
+function getBucket(namespace: string, ip: string): RateLimitBucket {
+  const key = `${namespace}:${ip}`;
+  let bucket = ipRateBuckets.get(key);
+  if (!bucket) {
+    bucket = { attempts: 0, lockoutUntil: 0, windowStart: Date.now(), lastSeen: Date.now() };
+    ipRateBuckets.set(key, bucket);
+  }
+  bucket.lastSeen = Date.now();
+  return bucket;
+}
+
+function checkLockout(namespace: string, ip: string): { locked: boolean; remainingSeconds: number; attempts: number } {
+  const bucket = getBucket(namespace, ip);
+  const now = Date.now();
+  if (now < bucket.lockoutUntil) {
+    return {
+      locked: true,
+      remainingSeconds: Math.ceil((bucket.lockoutUntil - now) / 1000),
+      attempts: bucket.attempts,
+    };
+  }
+  if (bucket.lockoutUntil > 0 && now >= bucket.lockoutUntil) {
+    bucket.attempts = 0;
+    bucket.lockoutUntil = 0;
+  }
+  return { locked: false, remainingSeconds: 0, attempts: bucket.attempts };
+}
+
+function recordFailedAttempt(namespace: string, ip: string, maxAttempts: number, lockoutMs: number): { locked: boolean; remainingSeconds: number; attemptsLeft: number } {
+  const bucket = getBucket(namespace, ip);
+  bucket.attempts += 1;
+  if (bucket.attempts >= maxAttempts) {
+    bucket.lockoutUntil = Date.now() + lockoutMs;
+    return {
+      locked: true,
+      remainingSeconds: Math.ceil(lockoutMs / 1000),
+      attemptsLeft: 0,
+    };
+  }
+  return {
+    locked: false,
+    remainingSeconds: 0,
+    attemptsLeft: Math.max(0, maxAttempts - bucket.attempts),
+  };
+}
+
+function resetBucket(namespace: string, ip: string): void {
+  ipRateBuckets.delete(`${namespace}:${ip}`);
+}
+
+function checkSlidingWindowLimit(namespace: string, ip: string, maxRequests: number, windowMs: number): { allowed: boolean; retryAfterSeconds: number } {
+  const bucket = getBucket(namespace, ip);
+  const now = Date.now();
+  if (now - bucket.windowStart > windowMs) {
+    bucket.windowStart = now;
+    bucket.attempts = 0;
+  }
+  bucket.attempts += 1;
+  if (bucket.attempts > maxRequests) {
+    return {
+      allowed: false,
+      retryAfterSeconds: Math.max(1, Math.ceil((bucket.windowStart + windowMs - now) / 1000)),
+    };
+  }
+  return { allowed: true, retryAfterSeconds: 0 };
+}
 
 // Signed session helpers
 function signSessionId(sessionId: string): string {
@@ -242,59 +353,81 @@ function verifySignedSession(cookieVal: string): string | null {
 
 const activeSessions = new Map<string, { email: string; owner: boolean; codeVerified: boolean; expiresAt: number; ip?: string; userAgent?: string; createdAt?: string }>();
 
+// Periodic garbage collection for expired sessions and stale rate limit buckets
+setInterval(() => {
+  const now = Date.now();
+  activeSessions.forEach((sess, key) => {
+    if (sess.expiresAt < now) activeSessions.delete(key);
+  });
+  ipRateBuckets.forEach((bucket, key) => {
+    if (now - bucket.lastSeen > 30 * 60 * 1000 && now > bucket.lockoutUntil) {
+      ipRateBuckets.delete(key);
+    }
+  });
+}, 10 * 60 * 1000).unref();
+
 // ==========================================
 // 🛡️ ARGON2ID CENTRALIZED SECURITY SYSTEM
 // ==========================================
-const CENTRAL_SECURITY_FILE = path.resolve(process.cwd(), 'central_security_config.json');
+const CENTRAL_SECURITY_FILE = getDataFilePath('central_security_config.json');
+const CLOUD_SECURITY_KEY = 'echox:central_security_config';
 
 interface CentralSecurityConfig {
-  access_code_argon2: string; // Argon2id hash for search access code (default: '#echox_vault_99')
-  pin_argon2: string;         // Argon2id hash for PIN code (default: '570216')
+  access_code_argon2: string;
+  pin_argon2: string;
   updated_at: string;
   history: Array<{ type: string; timestamp: string }>;
 }
 
 let centralSecurityConfig: CentralSecurityConfig | null = null;
-let accessCodeLockoutUntil = 0;
-let accessCodeFailedAttempts = 0;
-let pinLockoutUntil = 0;
-let pinFailedAttempts = 0;
+
+function persistCentralSecurityConfig(cfg: CentralSecurityConfig): void {
+  try {
+    atomicWriteJsonSync(CENTRAL_SECURITY_FILE, cfg);
+  } catch (err) {
+    console.warn('[Security] Notice persisting central security config:', err);
+  }
+  pushCloudJson(CLOUD_SECURITY_KEY, cfg);
+}
 
 async function initCentralSecurityConfig(): Promise<CentralSecurityConfig> {
+  if (isCloudPersistenceEnabled()) {
+    const cloudCfg = await loadCloudJson<CentralSecurityConfig>(CLOUD_SECURITY_KEY);
+    if (cloudCfg && cloudCfg.access_code_argon2 && cloudCfg.pin_argon2) {
+      centralSecurityConfig = cloudCfg;
+      try {
+        atomicWriteJsonSync(CENTRAL_SECURITY_FILE, cloudCfg);
+      } catch {}
+      return cloudCfg;
+    }
+  }
+
   try {
     if (fs.existsSync(CENTRAL_SECURITY_FILE)) {
       const data = JSON.parse(fs.readFileSync(CENTRAL_SECURITY_FILE, 'utf-8'));
       if (data && data.access_code_argon2 && data.pin_argon2) {
         centralSecurityConfig = data;
+        if (isCloudPersistenceEnabled()) {
+          pushCloudJson(CLOUD_SECURITY_KEY, data);
+        }
         return data;
       }
     }
   } catch (err) {
-    console.warn('[Security] Notice reading central security config, generating initial hashes:', err);
+    console.warn('[Security] Notice reading central security config, initializing from Argon2id hashes:', err);
   }
 
-  // Generate initial Argon2id hashes for default credentials
-  const accessHash = await argon2.hash('#echox_vault_99', { type: argon2.argon2id });
-  const pinHash = await argon2.hash('570216', { type: argon2.argon2id });
-
   const config: CentralSecurityConfig = {
-    access_code_argon2: accessHash,
-    pin_argon2: pinHash,
+    access_code_argon2: DEFAULT_ACCESS_ARGON2,
+    pin_argon2: DEFAULT_PIN_ARGON2,
     updated_at: new Date().toISOString(),
     history: [{ type: 'INITIALIZED', timestamp: new Date().toISOString() }]
   };
 
-  try {
-    fs.writeFileSync(CENTRAL_SECURITY_FILE, JSON.stringify(config, null, 2));
-  } catch (err) {
-    console.warn('[Security] Notice writing central security config:', err);
-  }
-
+  persistCentralSecurityConfig(config);
   centralSecurityConfig = config;
   return config;
 }
-
-initCentralSecurityConfig().catch(console.error);
 
 function parseCookies(req: Request): Record<string, string> {
   const list: Record<string, string> = {};
@@ -335,7 +468,7 @@ app.post('/api/createOwnerSession', async (req: Request, res: Response) => {
 
     // Set secure __session signed cookie
     res.setHeader('Set-Cookie', [
-      `__session=${signedCookie}; Path=/; Max-Age=${5 * 24 * 3600}; SameSite=Lax; HttpOnly`
+      buildSessionCookie(req, signedCookie, 5 * 24 * 3600)
     ]);
 
     return res.json({
@@ -377,8 +510,8 @@ app.get('/api/owner/me', (req: Request, res: Response) => {
   });
 });
 
-// 5. verifySecurityCode (Stage 4 Sovereign Master Passcode)
-app.post('/api/security/verifyCode', (req: Request, res: Response) => {
+// 5. verifySecurityCode (Verified directly against Argon2id PIN hash)
+app.post('/api/security/verifyCode', async (req: Request, res: Response) => {
   try {
     const cookies = parseCookies(req);
     const cookieVal = cookies['__session'];
@@ -393,16 +526,18 @@ app.post('/api/security/verifyCode', (req: Request, res: Response) => {
     }
 
     const session = activeSessions.get(rawSessionId)!;
-
-    // Check Lockout
-    const now = Date.now();
-    if (now < codeLockoutUntil) {
-      const remainingSecs = Math.ceil((codeLockoutUntil - now) / 1000);
-      return res.status(429).json({ 
-        error: `تم قفل شيفرة الحماية مؤقتاً لحماية الحساب. يرجى الانتظار ${remainingSecs} ثانية.`,
+    const ip = getClientIp(req);
+    const lockState = checkLockout('verifyCode', ip);
+    if (lockState.locked) {
+      return res.status(429).json({
+        error: `تم قفل شيفرة الحماية مؤقتاً لحماية الحساب. يرجى الانتظار ${lockState.remainingSeconds} ثانية.`,
         locked: true,
-        remainingSeconds: remainingSecs
+        remainingSeconds: lockState.remainingSeconds
       });
+    }
+
+    if (!centralSecurityConfig) {
+      await initCentralSecurityConfig();
     }
 
     const { code } = req.body || {};
@@ -410,31 +545,28 @@ app.post('/api/security/verifyCode', (req: Request, res: Response) => {
       return res.status(400).json({ error: 'يرجى إدخال شيفرة الأمان السيادية.' });
     }
 
-    const inputHash = hashSecurityCode(String(code).trim(), securityConfig.salt);
-    const isMatch = (inputHash.length === securityConfig.hash.length) &&
-      crypto.timingSafeEqual(Buffer.from(inputHash), Buffer.from(securityConfig.hash));
+    let isMatch = false;
+    try {
+      isMatch = await argon2.verify(centralSecurityConfig!.pin_argon2, String(code).trim());
+    } catch {}
 
     if (!isMatch) {
-      failedCodeAttempts++;
-      if (failedCodeAttempts >= 3) {
-        codeLockoutUntil = Date.now() + (5 * 60 * 1000); // 5 minutes lock
+      const fail = recordFailedAttempt('verifyCode', ip, 3, 5 * 60 * 1000);
+      if (fail.locked) {
         return res.status(429).json({
           error: 'تم تجاوز الحد الأقصى للمحاولات (3 محاولات خاطئة). تم تفعيل القفل الأمني لمدة 5 دقائق.',
           locked: true,
-          remainingSeconds: 300
+          remainingSeconds: fail.remainingSeconds
         });
       }
 
-      const attemptsLeft = 3 - failedCodeAttempts;
       return res.status(403).json({
-        error: `شيفرة الأمان غير صحيحة! يتبقى لديك ${attemptsLeft} ${attemptsLeft === 1 ? 'محاولة واحدة' : 'محاولات'}.`,
-        attemptsLeft
+        error: `شيفرة الأمان غير صحيحة! يتبقى لديك ${fail.attemptsLeft} ${fail.attemptsLeft === 1 ? 'محاولة واحدة' : 'محاولات'}.`,
+        attemptsLeft: fail.attemptsLeft
       });
     }
 
-    // Success: Unlock Session
-    failedCodeAttempts = 0;
-    codeLockoutUntil = 0;
+    resetBucket('verifyCode', ip);
     session.codeVerified = true;
 
     return res.json({
@@ -449,8 +581,8 @@ app.post('/api/security/verifyCode', (req: Request, res: Response) => {
   }
 });
 
-// 6. updateSecurityCode (Owner can change their master code)
-app.post('/api/security/updateCode', (req: Request, res: Response) => {
+// 6. updateSecurityCode (Owner can change their PIN through Argon2id)
+app.post('/api/security/updateCode', async (req: Request, res: Response) => {
   try {
     const cookies = parseCookies(req);
     const cookieVal = cookies['__session'];
@@ -465,30 +597,28 @@ app.post('/api/security/updateCode', (req: Request, res: Response) => {
       return res.status(403).json({ error: 'يجب تأكيد شيفرة الأمان الحالية أولاً.' });
     }
 
+    if (!centralSecurityConfig) {
+      await initCentralSecurityConfig();
+    }
+
     const { currentCode, newCode } = req.body || {};
     if (!currentCode || !newCode || String(newCode).trim().length < 4) {
       return res.status(400).json({ error: 'الشيفرة الجديدة يجب أن تحتوي على 4 خانات على الأقل.' });
     }
 
-    // Verify current code
-    const currentHash = hashSecurityCode(String(currentCode).trim(), securityConfig.salt);
-    const isCurrentValid = (currentHash.length === securityConfig.hash.length) &&
-      crypto.timingSafeEqual(Buffer.from(currentHash), Buffer.from(securityConfig.hash));
-
+    const isCurrentValid = await argon2.verify(centralSecurityConfig!.pin_argon2, String(currentCode).trim());
     if (!isCurrentValid) {
       return res.status(403).json({ error: 'شيفرة الأمان الحالية غير صحيحة.' });
     }
 
-    // Generate new salt and hash
-    const newSalt = crypto.randomBytes(16).toString('hex');
-    const newHash = hashSecurityCode(String(newCode).trim(), newSalt);
-    securityConfig = { salt: newSalt, hash: newHash };
-
-    try {
-      fs.writeFileSync(SECURITY_FILE, JSON.stringify(securityConfig, null, 2));
-    } catch (e) {
-      console.warn('Error saving security config to disk:', e);
-    }
+    const newHash = await argon2.hash(String(newCode).trim(), { type: argon2.argon2id });
+    centralSecurityConfig!.pin_argon2 = newHash;
+    centralSecurityConfig!.updated_at = new Date().toISOString();
+    centralSecurityConfig!.history = [
+      { type: 'PIN_CHANGED', timestamp: new Date().toISOString() },
+      ...(centralSecurityConfig!.history || [])
+    ].slice(0, 10);
+    persistCentralSecurityConfig(centralSecurityConfig!);
 
     return res.json({
       success: true,
@@ -503,21 +633,13 @@ app.post('/api/security/updateCode', (req: Request, res: Response) => {
 
 // 7. emergencyLockdown (Panic button: instantly revokes all active sessions)
 app.post('/api/security/emergencyLockdown', (req: Request, res: Response) => {
+  if (!requireAdminAuth(req, res)) return;
   try {
-    const cookies = parseCookies(req);
-    const cookieVal = cookies['__session'];
-    const rawSessionId = verifySignedSession(cookieVal);
-
-    if (!rawSessionId) {
-      return res.status(401).json({ error: 'غير مصرح.' });
-    }
-
-    // Purge ALL active sessions immediately
     const sessionCount = activeSessions.size;
     activeSessions.clear();
 
     res.setHeader('Set-Cookie', [
-      '__session=; Path=/; Max-Age=0; SameSite=Lax; HttpOnly'
+      buildSessionCookie(req, '', 0)
     ]);
 
     console.warn(`[ECHOX_SECURITY_LOCKDOWN] Emergency Lockdown triggered! Revoked ${sessionCount} active sessions.`);
@@ -535,18 +657,16 @@ app.post('/api/security/emergencyLockdown', (req: Request, res: Response) => {
 
 // 8. securityStatus
 app.get('/api/security/status', (req: Request, res: Response) => {
-  const now = Date.now();
-  const locked = now < codeLockoutUntil;
-  const remainingSeconds = locked ? Math.ceil((codeLockoutUntil - now) / 1000) : 0;
-  const attemptsLeft = Math.max(0, 3 - failedCodeAttempts);
+  const ip = getClientIp(req);
+  const lockState = checkLockout('verifyCode', ip);
 
   return res.json({
     activeLayers: 4,
     defaultCodeAvailable: true,
-    locked,
-    remainingSeconds,
-    attemptsLeft,
-    encryptionAlgorithm: 'SHA-256 + HMAC-SHA256'
+    locked: lockState.locked,
+    remainingSeconds: lockState.remainingSeconds,
+    attemptsLeft: Math.max(0, 3 - lockState.attempts),
+    encryptionAlgorithm: 'Argon2id + HMAC-SHA256'
   });
 });
 
@@ -561,15 +681,15 @@ app.post('/api/owner/logout', (req: Request, res: Response) => {
     }
   }
   res.setHeader('Set-Cookie', [
-    '__session=; Path=/; Max-Age=0; SameSite=Lax; HttpOnly'
+    buildSessionCookie(req, '', 0)
   ]);
   return res.json({ success: true, message: 'تم إنهاء جلسة المالك بنجاح.' });
 });
 
 // ==========================================
-// 📱 OS-LEVEL PHONE LOCK (PATTERN & PIN) APIS
+// 📱 OS-LEVEL PHONE LOCK (LEGACY COMPAT APIS)
 // ==========================================
-const OWNER_LOCK_FILE = path.resolve(process.cwd(), 'owner_lock_config.json');
+const OWNER_LOCK_FILE = getDataFilePath('owner_lock_config.json');
 
 interface OwnerLockConfigData {
   lock_type: 'pattern' | 'pin';
@@ -595,43 +715,41 @@ function loadOwnerLockConfig(): OwnerLockConfigData | null {
 }
 
 let ownerLockConfig = loadOwnerLockConfig();
-let osLockoutUntil = 0;
-let consecutiveOsFailures = 0;
 
 // 1. GET /api/security/ownerLockConfig
-app.get('/api/security/ownerLockConfig', (_req: Request, res: Response) => {
+app.get('/api/security/ownerLockConfig', (req: Request, res: Response) => {
   ownerLockConfig = loadOwnerLockConfig();
-  const now = Date.now();
-  const lockedOut = now < osLockoutUntil;
-  const remainingSeconds = lockedOut ? Math.ceil((osLockoutUntil - now) / 1000) : 0;
+  const ip = getClientIp(req);
+  const lockState = checkLockout('osLock', ip);
 
   if (!ownerLockConfig || (!ownerLockConfig.lock_hash && !ownerLockConfig.code_hash)) {
     return res.json({
       configured: false,
-      lock_type: 'pattern',
+      lock_type: 'pin',
       lock_hash: '',
       code_hash: '',
       failed_attempts: [],
-      lockedOut: false,
-      remainingSeconds: 0,
-      consecutiveFailures: 0
+      lockedOut: lockState.locked,
+      remainingSeconds: lockState.remainingSeconds,
+      consecutiveFailures: lockState.attempts
     });
   }
 
   return res.json({
     configured: true,
-    lock_type: ownerLockConfig.lock_type || 'pattern',
-    lock_hash: ownerLockConfig.lock_hash || ownerLockConfig.code_hash || '',
-    code_hash: ownerLockConfig.code_hash || ownerLockConfig.lock_hash || '',
+    lock_type: ownerLockConfig.lock_type || 'pin',
+    lock_hash: '',
+    code_hash: '',
     failed_attempts: ownerLockConfig.failed_attempts || [],
-    lockedOut,
-    remainingSeconds,
-    consecutiveFailures: consecutiveOsFailures
+    lockedOut: lockState.locked,
+    remainingSeconds: lockState.remainingSeconds,
+    consecutiveFailures: lockState.attempts
   });
 });
 
-// 2. POST /api/security/saveLockConfig
+// 2. POST /api/security/saveLockConfig (Admin authenticated)
 app.post('/api/security/saveLockConfig', (req: Request, res: Response) => {
+  if (!requireAdminAuth(req, res)) return;
   try {
     const { lock_type = 'pattern', lock_hash, code_hash } = req.body || {};
     const finalHash = lock_hash || code_hash;
@@ -641,7 +759,6 @@ app.post('/api/security/saveLockConfig', (req: Request, res: Response) => {
     }
 
     const currentAttempts = ownerLockConfig?.failed_attempts || [];
-
     const newConfig: OwnerLockConfigData = {
       lock_type: lock_type === 'pin' ? 'pin' : 'pattern',
       lock_hash: finalHash.trim(),
@@ -650,15 +767,13 @@ app.post('/api/security/saveLockConfig', (req: Request, res: Response) => {
       failed_attempts: currentAttempts.slice(0, 5)
     };
 
-    fs.writeFileSync(OWNER_LOCK_FILE, JSON.stringify(newConfig, null, 2));
+    atomicWriteJsonSync(OWNER_LOCK_FILE, newConfig);
     ownerLockConfig = newConfig;
-    consecutiveOsFailures = 0;
-    osLockoutUntil = 0;
 
     return res.json({
       success: true,
       message: 'تم حفظ إعدادات قفل الهاتف المشفرة بنجاح.',
-      config: newConfig
+      config: { ...newConfig, lock_hash: '', code_hash: '' }
     });
   } catch (err: any) {
     console.error('Error saving lock config:', err);
@@ -669,14 +784,14 @@ app.post('/api/security/saveLockConfig', (req: Request, res: Response) => {
 // 3. POST /api/security/verifyLockHash
 app.post('/api/security/verifyLockHash', (req: Request, res: Response) => {
   try {
-    const now = Date.now();
-    if (now < osLockoutUntil) {
-      const remainingSecs = Math.ceil((osLockoutUntil - now) / 1000);
+    const ip = getClientIp(req);
+    const lockState = checkLockout('osLock', ip);
+    if (lockState.locked) {
       return res.status(429).json({
         success: false,
         lockedOut: true,
-        remainingSeconds: remainingSecs,
-        error: `المحاولات كثيرة، انتظر ${remainingSecs} ثانية`
+        remainingSeconds: lockState.remainingSeconds,
+        error: `المحاولات كثيرة، انتظر ${lockState.remainingSeconds} ثانية`
       });
     }
 
@@ -692,10 +807,12 @@ app.post('/api/security/verifyLockHash', (req: Request, res: Response) => {
       return res.status(400).json({ error: 'الرمز المدخل مطلوب.' });
     }
 
-    const isMatch = hash.trim().toLowerCase() === storedHash.trim().toLowerCase();
+    const incomingBuf = Buffer.from(String(hash).trim().toLowerCase());
+    const storedBuf = Buffer.from(storedHash.trim().toLowerCase());
+    const isMatch = incomingBuf.length === storedBuf.length && crypto.timingSafeEqual(incomingBuf, storedBuf);
 
     if (!isMatch) {
-      consecutiveOsFailures++;
+      const fail = recordFailedAttempt('osLock', ip, 5, 30000);
       const currentAttempts = ownerLockConfig?.failed_attempts || [];
       const newAttempts = [
         { timestamp: new Date().toISOString(), type: String(type) },
@@ -705,19 +822,16 @@ app.post('/api/security/verifyLockHash', (req: Request, res: Response) => {
       if (ownerLockConfig) {
         ownerLockConfig.failed_attempts = newAttempts;
         try {
-          fs.writeFileSync(OWNER_LOCK_FILE, JSON.stringify(ownerLockConfig, null, 2));
-        } catch (e) {
-          console.warn('Notice writing failed attempt:', e);
-        }
+          atomicWriteJsonSync(OWNER_LOCK_FILE, ownerLockConfig);
+        } catch {}
       }
 
-      if (consecutiveOsFailures >= 5) {
-        osLockoutUntil = Date.now() + 30000; // 30 seconds lockout
+      if (fail.locked) {
         return res.status(429).json({
           success: false,
           lockedOut: true,
-          remainingSeconds: 30,
-          error: 'المحاولات كثيرة، انتظر 30 ثانية'
+          remainingSeconds: fail.remainingSeconds,
+          error: `المحاولات كثيرة، انتظر ${fail.remainingSeconds} ثانية`
         });
       }
 
@@ -725,16 +839,13 @@ app.post('/api/security/verifyLockHash', (req: Request, res: Response) => {
         success: false,
         lockedOut: false,
         remainingSeconds: 0,
-        attemptsLeft: Math.max(0, 5 - consecutiveOsFailures),
+        attemptsLeft: fail.attemptsLeft,
         error: 'الرمز غير صحيح'
       });
     }
 
-    // Success! Reset failure count
-    consecutiveOsFailures = 0;
-    osLockoutUntil = 0;
+    resetBucket('osLock', ip);
 
-    // Also mark active session as verified if cookie exists
     const cookies = parseCookies(req);
     const cookieVal = cookies['__session'];
     if (cookieVal) {
@@ -758,8 +869,9 @@ app.post('/api/security/verifyLockHash', (req: Request, res: Response) => {
 // 4. POST /api/security/logFailedAttempt
 app.post('/api/security/logFailedAttempt', (req: Request, res: Response) => {
   try {
+    const ip = getClientIp(req);
     const { type = 'pattern' } = req.body || {};
-    consecutiveOsFailures++;
+    const fail = recordFailedAttempt('osLock', ip, 5, 30000);
 
     ownerLockConfig = loadOwnerLockConfig();
     const currentAttempts = ownerLockConfig?.failed_attempts || [];
@@ -771,59 +883,48 @@ app.post('/api/security/logFailedAttempt', (req: Request, res: Response) => {
     if (ownerLockConfig) {
       ownerLockConfig.failed_attempts = newAttempts;
       try {
-        fs.writeFileSync(OWNER_LOCK_FILE, JSON.stringify(ownerLockConfig, null, 2));
-      } catch (e) {
-        console.warn('Notice writing failed attempt log:', e);
-      }
-    }
-
-    const now = Date.now();
-    let lockedOut = false;
-    let remainingSeconds = 0;
-
-    if (consecutiveOsFailures >= 5) {
-      osLockoutUntil = now + 30000;
-      lockedOut = true;
-      remainingSeconds = 30;
+        atomicWriteJsonSync(OWNER_LOCK_FILE, ownerLockConfig);
+      } catch {}
     }
 
     return res.json({
       success: true,
-      consecutiveFailures: consecutiveOsFailures,
-      lockedOut,
-      remainingSeconds,
+      consecutiveFailures: 5 - fail.attemptsLeft,
+      lockedOut: fail.locked,
+      remainingSeconds: fail.remainingSeconds,
       failed_attempts: newAttempts
     });
-  } catch (err: any) {
+  } catch {
     return res.status(500).json({ error: 'Failed logging attempt' });
   }
 });
 
-// 5. POST /api/security/resetLockConfig
-app.post('/api/security/resetLockConfig', (_req: Request, res: Response) => {
+// 5. POST /api/security/resetLockConfig (Admin authenticated)
+app.post('/api/security/resetLockConfig', (req: Request, res: Response) => {
+  if (!requireAdminAuth(req, res)) return;
   try {
     if (fs.existsSync(OWNER_LOCK_FILE)) {
       fs.unlinkSync(OWNER_LOCK_FILE);
     }
     ownerLockConfig = null;
-    consecutiveOsFailures = 0;
-    osLockoutUntil = 0;
+    resetBucket('osLock', getClientIp(req));
 
     return res.json({
       success: true,
       message: 'تم مسح رمز القفل وإعادة تعيين النظام.'
     });
-  } catch (err: any) {
+  } catch {
     return res.status(500).json({ error: 'فشل إعادة التعيين.' });
   }
 });
 
-// 6. POST /api/security/logoutAllDevices
-app.post('/api/security/logoutAllDevices', (_req: Request, res: Response) => {
+// 6. POST /api/security/logoutAllDevices (Admin authenticated)
+app.post('/api/security/logoutAllDevices', (req: Request, res: Response) => {
+  if (!requireAdminAuth(req, res)) return;
   const count = activeSessions.size;
   activeSessions.clear();
   res.setHeader('Set-Cookie', [
-    '__session=; Path=/; Max-Age=0; SameSite=Lax; HttpOnly'
+    buildSessionCookie(req, '', 0)
   ]);
   return res.json({
     success: true,
@@ -838,14 +939,14 @@ app.post('/api/security/logoutAllDevices', (_req: Request, res: Response) => {
 // 1. Verify Secret Access Code (invoked from search bar)
 app.post('/api/security/verifyAccessCode', async (req: Request, res: Response) => {
   try {
-    const now = Date.now();
-    if (now < accessCodeLockoutUntil) {
-      const remainingSeconds = Math.ceil((accessCodeLockoutUntil - now) / 1000);
+    const ip = getClientIp(req);
+    const lockState = checkLockout('accessCode', ip);
+    if (lockState.locked) {
       return res.status(429).json({
         success: false,
         lockedOut: true,
-        remainingSeconds,
-        error: `تم تجميد محاولات رمز الوصول، يرجى الانتظار ${remainingSeconds} ثانية.`
+        remainingSeconds: lockState.remainingSeconds,
+        error: `تم تجميد محاولات رمز الوصول، يرجى الانتظار ${lockState.remainingSeconds} ثانية.`
       });
     }
 
@@ -863,7 +964,6 @@ app.post('/api/security/verifyAccessCode', async (req: Request, res: Response) =
       return res.status(400).json({ success: false, error: 'رمز الوصول قصير جداً.' });
     }
 
-    // Argon2id verification
     let isMatch = false;
     try {
       isMatch = await argon2.verify(centralSecurityConfig!.access_code_argon2, trimmed);
@@ -872,22 +972,19 @@ app.post('/api/security/verifyAccessCode', async (req: Request, res: Response) =
     }
 
     if (isMatch) {
-      accessCodeFailedAttempts = 0;
-      accessCodeLockoutUntil = 0;
+      resetBucket('accessCode', ip);
       return res.json({
         success: true,
         message: 'تم التحقق من رمز الوصول بنجاح.'
       });
     }
 
-    // Failed attempt
-    accessCodeFailedAttempts++;
-    if (accessCodeFailedAttempts >= 5) {
-      accessCodeLockoutUntil = Date.now() + 30000;
+    const fail = recordFailedAttempt('accessCode', ip, 5, 30000);
+    if (fail.locked) {
       return res.status(429).json({
         success: false,
         lockedOut: true,
-        remainingSeconds: 30,
+        remainingSeconds: fail.remainingSeconds,
         error: 'تجاوزت عدد المحاولات المسموح به. تم تجميد البوابة لمدة 30 ثانية.'
       });
     }
@@ -896,7 +993,7 @@ app.post('/api/security/verifyAccessCode', async (req: Request, res: Response) =
       success: false,
       lockedOut: false,
       remainingSeconds: 0,
-      attemptsLeft: Math.max(0, 5 - accessCodeFailedAttempts),
+      attemptsLeft: fail.attemptsLeft,
       error: 'رمز الوصول غير صحيح.'
     });
 
@@ -909,14 +1006,14 @@ app.post('/api/security/verifyAccessCode', async (req: Request, res: Response) =
 // 2. Verify PIN with Argon2id
 app.post('/api/security/verifyPin', async (req: Request, res: Response) => {
   try {
-    const now = Date.now();
-    if (now < pinLockoutUntil) {
-      const remainingSeconds = Math.ceil((pinLockoutUntil - now) / 1000);
+    const ip = getClientIp(req);
+    const lockState = checkLockout('pin', ip);
+    if (lockState.locked) {
       return res.status(429).json({
         success: false,
         lockedOut: true,
-        remainingSeconds,
-        error: `تم تجميد محاولات PIN، يرجى الانتظار ${remainingSeconds} ثانية.`
+        remainingSeconds: lockState.remainingSeconds,
+        error: `تم تجميد محاولات PIN، يرجى الانتظار ${lockState.remainingSeconds} ثانية.`
       });
     }
 
@@ -938,8 +1035,7 @@ app.post('/api/security/verifyPin', async (req: Request, res: Response) => {
     }
 
     if (isMatch) {
-      pinFailedAttempts = 0;
-      pinLockoutUntil = 0;
+      resetBucket('pin', ip);
 
       const rawSessionId = `admin_${crypto.randomBytes(32).toString('hex')}`;
       const fiveDaysMs = 5 * 24 * 60 * 60 * 1000;
@@ -950,14 +1046,14 @@ app.post('/api/security/verifyPin', async (req: Request, res: Response) => {
         owner: true,
         codeVerified: true,
         expiresAt,
-        ip: (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress || '127.0.0.1',
+        ip,
         userAgent: req.headers['user-agent'] || 'Browser',
         createdAt: new Date().toISOString()
       });
 
       const signedCookie = signSessionId(rawSessionId);
       res.setHeader('Set-Cookie', [
-        `__session=${signedCookie}; Path=/; Max-Age=${5 * 24 * 3600}; SameSite=Lax; HttpOnly`
+        buildSessionCookie(req, signedCookie, 5 * 24 * 3600)
       ]);
 
       return res.json({
@@ -967,13 +1063,12 @@ app.post('/api/security/verifyPin', async (req: Request, res: Response) => {
       });
     }
 
-    pinFailedAttempts++;
-    if (pinFailedAttempts >= 5) {
-      pinLockoutUntil = Date.now() + 30000;
+    const fail = recordFailedAttempt('pin', ip, 5, 30000);
+    if (fail.locked) {
       return res.status(429).json({
         success: false,
         lockedOut: true,
-        remainingSeconds: 30,
+        remainingSeconds: fail.remainingSeconds,
         error: 'تجاوزت عدد محاولات PIN المسموحة. تم قفل البوابة مؤقتاً لمدة 30 ثانية.'
       });
     }
@@ -982,8 +1077,8 @@ app.post('/api/security/verifyPin', async (req: Request, res: Response) => {
       success: false,
       lockedOut: false,
       remainingSeconds: 0,
-      attemptsLeft: Math.max(0, 5 - pinFailedAttempts),
-      error: `رمز PIN غير صحيح! المحاولات المتبقية: ${Math.max(0, 5 - pinFailedAttempts)}`
+      attemptsLeft: fail.attemptsLeft,
+      error: `رمز PIN غير صحيح! المحاولات المتبقية: ${fail.attemptsLeft}`
     });
 
   } catch (err: any) {
@@ -992,9 +1087,16 @@ app.post('/api/security/verifyPin', async (req: Request, res: Response) => {
   }
 });
 
-// 3. Update Access Code
+// 3. Update Access Code (Admin session + current PIN verification + rate limited)
 app.post('/api/security/updateAccessCode', async (req: Request, res: Response) => {
+  if (!requireAdminAuth(req, res)) return;
   try {
+    const ip = getClientIp(req);
+    const rate = checkSlidingWindowLimit('updateAccessCode', ip, 10, 5 * 60 * 1000);
+    if (!rate.allowed) {
+      return res.status(429).json({ error: `محاولات كثيرة، يرجى الانتظار ${rate.retryAfterSeconds} ثانية.` });
+    }
+
     if (!centralSecurityConfig) {
       await initCentralSecurityConfig();
     }
@@ -1036,10 +1138,8 @@ app.post('/api/security/updateAccessCode', async (req: Request, res: Response) =
       ...(centralSecurityConfig!.history || [])
     ].slice(0, 10);
 
-    fs.writeFileSync(CENTRAL_SECURITY_FILE, JSON.stringify(centralSecurityConfig, null, 2));
-
-    accessCodeFailedAttempts = 0;
-    accessCodeLockoutUntil = 0;
+    persistCentralSecurityConfig(centralSecurityConfig!);
+    resetBucket('accessCode', ip);
 
     return res.json({
       success: true,
@@ -1052,9 +1152,16 @@ app.post('/api/security/updateAccessCode', async (req: Request, res: Response) =
   }
 });
 
-// 4. Update PIN
+// 4. Update PIN (Admin session + current PIN verification + rate limited)
 app.post('/api/security/updatePin', async (req: Request, res: Response) => {
+  if (!requireAdminAuth(req, res)) return;
   try {
+    const ip = getClientIp(req);
+    const rate = checkSlidingWindowLimit('updatePin', ip, 10, 5 * 60 * 1000);
+    if (!rate.allowed) {
+      return res.status(429).json({ error: `محاولات كثيرة، يرجى الانتظار ${rate.retryAfterSeconds} ثانية.` });
+    }
+
     if (!centralSecurityConfig) {
       await initCentralSecurityConfig();
     }
@@ -1082,7 +1189,7 @@ app.post('/api/security/updatePin', async (req: Request, res: Response) => {
       ...(centralSecurityConfig!.history || [])
     ].slice(0, 10);
 
-    fs.writeFileSync(CENTRAL_SECURITY_FILE, JSON.stringify(centralSecurityConfig, null, 2));
+    persistCentralSecurityConfig(centralSecurityConfig!);
 
     try {
       const legacyLock: OwnerLockConfigData = {
@@ -1092,12 +1199,11 @@ app.post('/api/security/updatePin', async (req: Request, res: Response) => {
         updated_at: new Date().toISOString(),
         failed_attempts: []
       };
-      fs.writeFileSync(OWNER_LOCK_FILE, JSON.stringify(legacyLock, null, 2));
+      atomicWriteJsonSync(OWNER_LOCK_FILE, legacyLock);
       ownerLockConfig = legacyLock;
     } catch {}
 
-    pinFailedAttempts = 0;
-    pinLockoutUntil = 0;
+    resetBucket('pin', ip);
 
     return res.json({
       success: true,
@@ -1110,8 +1216,9 @@ app.post('/api/security/updatePin', async (req: Request, res: Response) => {
   }
 });
 
-// 5. Active Sessions List
+// 5. Active Sessions List (Admin authenticated)
 app.get('/api/security/sessions', (req: Request, res: Response) => {
+  if (!requireAdminAuth(req, res)) return;
   const cookies = parseCookies(req);
   const currentCookie = cookies['__session'];
   const currentSessionId = currentCookie ? verifySignedSession(currentCookie) : null;
@@ -1127,9 +1234,9 @@ app.get('/api/security/sessions', (req: Request, res: Response) => {
   activeSessions.forEach((val, id) => {
     list.push({
       id: `${id.substring(0, 8)}...${id.substring(id.length - 4)}`,
-      ip: (val as any).ip || '127.0.0.1',
-      userAgent: (val as any).userAgent || 'Browser',
-      createdAt: (val as any).createdAt || new Date().toISOString(),
+      ip: val.ip || '127.0.0.1',
+      userAgent: val.userAgent || 'Browser',
+      createdAt: val.createdAt || new Date().toISOString(),
       isCurrent: id === currentSessionId
     });
   });
@@ -1146,6 +1253,7 @@ app.get('/api/security/systemStatus', (_req: Request, res: Response) => {
     argon2idEnabled: true,
     hashingAlgorithm: 'Argon2id (m=65536, t=3, p=4)',
     serverSideEnforced: true,
+    storageMode: isCloudPersistenceEnabled() ? 'upstash-redis+local-atomic' : 'local-atomic-disk',
     activeSessionsCount: activeSessions.size,
     accessCodeConfigured: true,
     pinConfigured: true,
@@ -1190,8 +1298,13 @@ app.post('/api/admin/payments/catalog-sync', (req: Request, res: Response) => {
   return res.json({ success: true });
 });
 
-// 3. Server-Verified Multi-Vendor Checkout
+// 3. Server-Verified Multi-Vendor Checkout (Rate limited per IP)
 app.post('/api/payments/checkout', async (req: Request, res: Response) => {
+  const ip = getClientIp(req);
+  const rate = checkSlidingWindowLimit('checkout', ip, 20, 60 * 1000);
+  if (!rate.allowed) {
+    return res.status(429).json({ success: false, error: `تم تجاوز حد الطلبات، يرجى الانتظار ${rate.retryAfterSeconds} ثانية.` });
+  }
   try {
     const result = await processServerCheckout(req.body);
     if (!result.ok) {
@@ -1209,8 +1322,13 @@ app.post('/api/payments/checkout', async (req: Request, res: Response) => {
   }
 });
 
-// 4. Customer Submit Bank Transfer Proof
+// 4. Customer Submit Bank Transfer Proof (Rate limited per IP)
 app.post('/api/payments/bank-transfer/proof', (req: Request, res: Response) => {
+  const ip = getClientIp(req);
+  const rate = checkSlidingWindowLimit('bankProof', ip, 20, 60 * 1000);
+  if (!rate.allowed) {
+    return res.status(429).json({ success: false, error: `تم تجاوز حد الإرسال، يرجى الانتظار ${rate.retryAfterSeconds} ثانية.` });
+  }
   const cookies = parseCookies(req);
   const rawSid = cookies['__session'] ? verifySignedSession(cookies['__session']) : null;
   const isAdmin = Boolean(rawSid && activeSessions.get(rawSid)?.codeVerified);
@@ -1227,6 +1345,11 @@ app.post('/api/payments/bank-transfer/proof', (req: Request, res: Response) => {
 
 // 5. Customer Request Cancellation / Refund
 app.post('/api/payments/request-refund', (req: Request, res: Response) => {
+  const ip = getClientIp(req);
+  const rate = checkSlidingWindowLimit('refundReq', ip, 15, 60 * 1000);
+  if (!rate.allowed) {
+    return res.status(429).json({ success: false, error: `تم تجاوز الحد المسموح، يرجى الانتظار ${rate.retryAfterSeconds} ثانية.` });
+  }
   const result = createCustomerRefundOrCancelRequest(req.body || {});
   if (!result.ok) {
     return res.status(result.statusCode || 400).json({ success: false, error: result.error });
@@ -1259,8 +1382,13 @@ app.get('/api/vendor/:vendorId/financials', (req: Request, res: Response) => {
   return res.json(getScopedVendorFinancials(vendorId));
 });
 
-// 8. Independent Support ECHOX Endpoints
+// 8. Independent Support ECHOX Endpoints (Rate limited per IP)
 app.post('/api/support/contribute', (req: Request, res: Response) => {
+  const ip = getClientIp(req);
+  const rate = checkSlidingWindowLimit('supportContribute', ip, 15, 60 * 1000);
+  if (!rate.allowed) {
+    return res.status(429).json({ success: false, error: `تم تجاوز حد الطلبات، يرجى الانتظار ${rate.retryAfterSeconds} ثانية.` });
+  }
   const result = createSupportContribution(req.body || {});
   if (!result.ok) {
     return res.status(result.statusCode || 400).json({ success: false, error: result.error });
@@ -1274,9 +1402,61 @@ app.get('/api/admin/payments/config', (req: Request, res: Response) => {
   return res.json(getPublicPaymentConfig());
 });
 
-app.put('/api/admin/payments/config', (req: Request, res: Response) => {
+app.put('/api/admin/payments/config', async (req: Request, res: Response) => {
   if (!requireAdminAuth(req, res)) return;
-  const result = updateAdminPaymentConfig(req.body || {});
+  const body = req.body || {};
+
+  // Step-Up Security Shield: Any change to bank account identity requires re-verifying PIN via Argon2id
+  if (isBankIdentityChange(body.bankTransfer)) {
+    if (isEnvLockedBank()) {
+      return res.status(403).json({
+        success: false,
+        error: 'الحساب البنكي مقفول من متغيرات البيئة (LOCKED_BANK_IBAN) ولا يمكن تعديله من الموقع.',
+      });
+    }
+
+    const ip = getClientIp(req);
+    const lockState = checkLockout('bankPinConfirm', ip);
+    if (lockState.locked) {
+      return res.status(429).json({
+        success: false,
+        error: `تم قفل تعديل الحساب البنكي مؤقتاً، يرجى الانتظار ${lockState.remainingSeconds} ثانية.`,
+      });
+    }
+
+    if (!centralSecurityConfig) {
+      await initCentralSecurityConfig();
+    }
+
+    const confirmPin = typeof body.confirmPin === 'string' ? body.confirmPin.trim() : '';
+    if (!confirmPin) {
+      return res.status(403).json({
+        success: false,
+        requiresPinConfirmation: true,
+        error: 'لتعديل بيانات الحساب البنكي أو فك تعليقه، يجب إدخال رمز الـ PIN الأمني للتأكيد.',
+      });
+    }
+
+    let pinValid = false;
+    try {
+      pinValid = await argon2.verify(centralSecurityConfig!.pin_argon2, confirmPin);
+    } catch {}
+
+    if (!pinValid) {
+      const fail = recordFailedAttempt('bankPinConfirm', ip, 3, 5 * 60 * 1000);
+      return res.status(403).json({
+        success: false,
+        requiresPinConfirmation: true,
+        error: fail.locked
+          ? 'محاولات PIN خاطئة متعددة! تم تجميد تعديل الحساب البنكي لمدة 5 دقائق.'
+          : `رمز الـ PIN التأكيدي غير صحيح! المحاولات المتبقية: ${fail.attemptsLeft}`,
+      });
+    }
+
+    resetBucket('bankPinConfirm', ip);
+  }
+
+  const result = updateAdminPaymentConfig(body);
   if (!result.ok) {
     return res.status(400).json({ success: false, error: result.error });
   }
@@ -1346,8 +1526,85 @@ app.patch('/api/admin/orders/:orderId/status', (req: Request, res: Response) => 
   return res.json({ success: true, order: result.order });
 });
 
+// 10. Live Customer Support Chat Routes
+app.get('/api/chat/config', (_req: Request, res: Response) => {
+  return res.json({ success: true, config: getPublicChatConfig() });
+});
+
+app.get('/api/chat/session/:sessionId', (req: Request, res: Response) => {
+  const thread = getChatThread(req.params.sessionId);
+  return res.json({ success: true, thread });
+});
+
+app.post('/api/chat/session/:sessionId/message', (req: Request, res: Response) => {
+  const ip = getClientIp(req);
+  const rate = checkSlidingWindowLimit('supportChat', ip, 30, 60 * 1000);
+  if (!rate.allowed) {
+    return res.status(429).json({
+      success: false,
+      error: `تم تجاوز حد الرسائل، يرجى الانتظار ${rate.retryAfterSeconds} ثانية.`,
+    });
+  }
+  const { language, customerLabel, customerText, autoReplyText, suggestedProducts, actionView } = req.body || {};
+  const result = recordCustomerChatExchange({
+    sessionId: req.params.sessionId,
+    language,
+    customerLabel,
+    customerText,
+    autoReplyText,
+    suggestedProducts,
+    actionView,
+  });
+  if (!result.ok) {
+    return res.status(400).json({ success: false, error: result.error });
+  }
+  return res.json({ success: true, thread: result.thread });
+});
+
+app.get('/api/admin/chat/threads', (req: Request, res: Response) => {
+  if (!requireAdminAuth(req, res)) return;
+  return res.json({ success: true, ...listAdminChatThreads() });
+});
+
+app.post('/api/admin/chat/threads/:sessionId/reply', (req: Request, res: Response) => {
+  if (!requireAdminAuth(req, res)) return;
+  const { replyText } = req.body || {};
+  const result = adminSendChatReply({
+    sessionId: req.params.sessionId,
+    replyText,
+  });
+  if (!result.ok) {
+    return res.status(400).json({ success: false, error: result.error });
+  }
+  return res.json({ success: true, thread: result.thread, message: result.message });
+});
+
+app.post('/api/admin/chat/threads/:sessionId/read', (req: Request, res: Response) => {
+  if (!requireAdminAuth(req, res)) return;
+  markThreadReadByOwner(req.params.sessionId);
+  return res.json({ success: true });
+});
+
+app.delete('/api/admin/chat/threads/:sessionId', (req: Request, res: Response) => {
+  if (!requireAdminAuth(req, res)) return;
+  deleteChatThread(req.params.sessionId);
+  return res.json({ success: true });
+});
+
+app.put('/api/admin/chat/config', (req: Request, res: Response) => {
+  if (!requireAdminAuth(req, res)) return;
+  const updated = updateChatConfig(req.body || {});
+  return res.json({ success: true, config: updated });
+});
+
 // --- PRODUCTION STATIC OR VITE DEV MIDDLEWARE ---
 async function startServer() {
+  await Promise.all([
+    initCentralSecurityConfig().catch((err) => console.error('[Security] Init notice:', err)),
+    hydratePaymentDbFromCloud().catch((err) => console.error('[PaymentEngine] Cloud hydrate notice:', err)),
+    hydrateChatDbFromCloud().catch((err) => console.error('[ChatEngine] Cloud hydrate notice:', err)),
+  ]);
+
   const isProd = process.env.NODE_ENV === 'production';
   const distDir = path.resolve(process.cwd(), 'dist');
 
@@ -1375,8 +1632,23 @@ async function startServer() {
     app.use(vite.middlewares);
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`[ECHOX STORE] Full-Stack Server (${isProd ? 'production' : 'development'}) listening on http://0.0.0.0:${PORT}`);
+  });
+
+  const shutdown = async (signal: string) => {
+    console.log(`[ECHOX STORE] Received ${signal}, flushing cloud writes and shutting down cleanly...`);
+    await flushCloudWrites();
+    server.close(() => {
+      process.exit(0);
+    });
+  };
+
+  process.on('SIGTERM', () => {
+    void shutdown('SIGTERM');
+  });
+  process.on('SIGINT', () => {
+    void shutdown('SIGINT');
   });
 }
 

@@ -83,59 +83,59 @@ export const CustomerPortal: React.FC = () => {
   if (!currentUser) {
     return (
       <div className="max-w-md mx-auto px-4 py-12 animate-fadeIn">
-        <div className="bg-white rounded-3xl border border-[#E8E4DD] shadow-lg p-6 sm:p-8 space-y-6">
+        <div className="bg-white dark:bg-[#0F172A] rounded-3xl border border-[#E8E4DD] dark:border-slate-800 shadow-lg p-6 sm:p-8 space-y-6 text-slate-900 dark:text-slate-100">
           <div className="text-center space-y-2">
             <div className="w-14 h-14 rounded-full bg-[#FF6B00]/10 text-[#FF6B00] flex items-center justify-center mx-auto">
               <User className="w-7 h-7" />
             </div>
-            <h1 className="text-xl font-black text-slate-900">تسجيل الدخول / فتح حساب زبون</h1>
-            <p className="text-xs text-slate-500">
+            <h1 className="text-xl font-black text-slate-900 dark:text-white">تسجيل الدخول / فتح حساب زبون</h1>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
               تابع طلبياتك واحفظ عناوين التوصيل في الـ 24 ولاية تونسية وقائمة المفضلة
             </p>
           </div>
 
           <form onSubmit={handleLoginSubmit} className="space-y-4">
             <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">البريد الإلكتروني</label>
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">البريد الإلكتروني</label>
               <input
                 type="email"
                 required
                 value={authEmail}
                 onChange={e => setAuthEmail(e.target.value)}
                 placeholder="votre.email@gmail.com"
-                className="w-full text-xs py-2.5 px-3 rounded-xl border border-slate-300 focus:outline-hidden focus:border-[#FF6B00]"
+                className="w-full text-xs py-2.5 px-3 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-[#1E293B] text-slate-900 dark:text-white focus:outline-hidden focus:border-[#FF6B00]"
                 dir="ltr"
               />
             </div>
 
             <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">الاسم الكامل</label>
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">الاسم الكامل</label>
               <input
                 type="text"
                 required
                 value={authName}
                 onChange={e => setAuthName(e.target.value)}
                 placeholder="الاسم واللقب"
-                className="w-full text-xs py-2.5 px-3 rounded-xl border border-slate-300 focus:outline-hidden focus:border-[#FF6B00]"
+                className="w-full text-xs py-2.5 px-3 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-[#1E293B] text-slate-900 dark:text-white focus:outline-hidden focus:border-[#FF6B00]"
               />
             </div>
 
             <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">رقم الهاتف التونسي</label>
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">رقم الهاتف التونسي</label>
               <input
                 type="tel"
                 required
                 value={authPhone}
                 onChange={e => setAuthPhone(e.target.value)}
                 placeholder="+216 21 000 000"
-                className="w-full text-xs py-2.5 px-3 rounded-xl border border-slate-300 focus:outline-hidden focus:border-[#FF6B00]"
+                className="w-full text-xs py-2.5 px-3 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-[#1E293B] text-slate-900 dark:text-white focus:outline-hidden focus:border-[#FF6B00]"
                 dir="ltr"
               />
             </div>
 
             <button
               type="submit"
-              className="w-full py-3 rounded-xl bg-[#0B0F17] hover:bg-[#FF6B00] text-white font-bold text-xs transition-colors shadow-sm"
+              className="w-full py-3 rounded-xl bg-[#0B0F17] dark:bg-[#FF6B00] hover:bg-[#FF6B00] dark:hover:bg-[#e05e00] text-white font-bold text-xs transition-colors shadow-sm cursor-pointer"
             >
               متابعة الدخول للمتجر
             </button>
@@ -150,17 +150,17 @@ export const CustomerPortal: React.FC = () => {
   const wishlistedProducts = products.filter(p => wishlist.includes(p.id));
 
   return (
-    <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8 space-y-8 animate-fadeIn">
+    <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8 space-y-8 animate-fadeIn text-slate-900 dark:text-slate-100">
       
       {/* Profile Banner */}
-      <div className="bg-white rounded-3xl border border-[#E8E4DD] shadow-sm p-6 flex flex-col sm:flex-row items-center justify-between gap-4">
+      <div className="bg-white dark:bg-[#0F172A] rounded-3xl border border-[#E8E4DD] dark:border-slate-800 shadow-sm p-6 flex flex-col sm:flex-row items-center justify-between gap-4">
         <div className="flex items-center gap-4">
-          <div className="w-14 h-14 rounded-2xl bg-[#0B0F17] text-white flex items-center justify-center font-black text-xl shadow-xs">
+          <div className="w-14 h-14 rounded-2xl bg-[#0B0F17] dark:bg-[#FF6B00] text-white flex items-center justify-center font-black text-xl shadow-xs">
             {currentUser.fullName.charAt(0)}
           </div>
           <div>
-            <h1 className="text-xl font-black text-slate-900">{currentUser.fullName}</h1>
-            <div className="flex items-center gap-3 text-xs text-slate-500 mt-0.5">
+            <h1 className="text-xl font-black text-slate-900 dark:text-white">{currentUser.fullName}</h1>
+            <div className="flex items-center flex-wrap gap-3 text-xs text-slate-500 dark:text-slate-400 mt-0.5">
               <span className="flex items-center gap-1">
                 <Mail className="w-3.5 h-3.5" />
                 <span dir="ltr">{currentUser.email}</span>
@@ -176,7 +176,7 @@ export const CustomerPortal: React.FC = () => {
 
         <button
           onClick={logoutCustomer}
-          className="px-4 py-2 rounded-xl border border-slate-200 hover:bg-red-50 hover:text-red-600 hover:border-red-200 text-slate-600 text-xs font-bold transition-colors flex items-center gap-1.5"
+          className="px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-red-50 dark:hover:bg-red-900/20 hover:text-red-600 dark:hover:text-red-400 hover:border-red-200 text-slate-600 dark:text-slate-300 text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer"
         >
           <LogOut className="w-3.5 h-3.5" />
           <span>تسجيل الخروج</span>
@@ -184,11 +184,11 @@ export const CustomerPortal: React.FC = () => {
       </div>
 
       {/* Tabs */}
-      <div className="flex items-center gap-2 border-b border-slate-200 pb-2">
+      <div className="flex items-center gap-2 border-b border-slate-200 dark:border-slate-800 pb-2 overflow-x-auto">
         <button
           onClick={() => setActiveTab('orders')}
-          className={`px-4 py-2 rounded-xl text-xs font-bold transition-colors flex items-center gap-2 ${
-            activeTab === 'orders' ? 'bg-[#0B0F17] text-white shadow-xs' : 'text-slate-600 hover:bg-slate-100'
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition-colors flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+            activeTab === 'orders' ? 'bg-[#0B0F17] dark:bg-[#FF6B00] text-white shadow-xs' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
           }`}
         >
           <Package className="w-4 h-4" />
@@ -197,8 +197,8 @@ export const CustomerPortal: React.FC = () => {
 
         <button
           onClick={() => setActiveTab('addresses')}
-          className={`px-4 py-2 rounded-xl text-xs font-bold transition-colors flex items-center gap-2 ${
-            activeTab === 'addresses' ? 'bg-[#0B0F17] text-white shadow-xs' : 'text-slate-600 hover:bg-slate-100'
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition-colors flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+            activeTab === 'addresses' ? 'bg-[#0B0F17] dark:bg-[#FF6B00] text-white shadow-xs' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
           }`}
         >
           <MapPin className="w-4 h-4" />
@@ -207,8 +207,8 @@ export const CustomerPortal: React.FC = () => {
 
         <button
           onClick={() => setActiveTab('wishlist')}
-          className={`px-4 py-2 rounded-xl text-xs font-bold transition-colors flex items-center gap-2 ${
-            activeTab === 'wishlist' ? 'bg-[#0B0F17] text-white shadow-xs' : 'text-slate-600 hover:bg-slate-100'
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition-colors flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+            activeTab === 'wishlist' ? 'bg-[#0B0F17] dark:bg-[#FF6B00] text-white shadow-xs' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
           }`}
         >
           <Heart className="w-4 h-4" />
@@ -220,13 +220,13 @@ export const CustomerPortal: React.FC = () => {
       {activeTab === 'orders' && (
         <div className="space-y-4">
           {customerOrders.length === 0 ? (
-            <div className="p-8 text-center bg-white rounded-3xl border border-slate-200 text-slate-500">
+            <div className="p-8 text-center bg-white dark:bg-[#0F172A] rounded-3xl border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400">
               لا توجد طلبات مسجلة بعد. تصفح المتجر واطلب الآن مع الدفع عند الاستلام!
             </div>
           ) : (
             customerOrders.map(order => (
-              <div key={order.id} className="bg-white rounded-2xl border border-slate-200 p-5 space-y-4 shadow-xs">
-                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
+              <div key={order.id} className="bg-white dark:bg-[#0F172A] rounded-2xl border border-slate-200 dark:border-slate-800 p-5 space-y-4 shadow-xs">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-3">
                   <div>
                     <span className="text-xs text-slate-400 block">رقم التتبع:</span>
                     <span className="font-mono font-bold text-sm text-[#FF6B00]">{order.trackingNumber}</span>
@@ -235,21 +235,21 @@ export const CustomerPortal: React.FC = () => {
                     <span className={`text-[11px] px-2.5 py-1 rounded-full font-bold border ${getPaymentStatusTone(order.paymentStatus)}`}>
                       {(t.payments.statuses as Record<string, string>)[order.paymentStatus] || order.paymentStatus}
                     </span>
-                    <span className="text-xs bg-slate-100 px-3 py-1 rounded-full font-bold text-slate-800">
+                    <span className="text-xs bg-slate-100 dark:bg-slate-800 px-3 py-1 rounded-full font-bold text-slate-800 dark:text-slate-200">
                       {t.orderStatus[order.status] || order.status}
                     </span>
                     <button
                       onClick={() => setCurrentView('my_orders')}
-                      className="text-xs text-[#FF6B00] hover:underline font-bold"
+                      className="text-xs text-[#FF6B00] hover:underline font-bold cursor-pointer"
                     >
                       تتبع مباشر
                     </button>
                   </div>
                 </div>
 
-                <div className="flex items-center justify-between text-xs text-slate-600">
+                <div className="flex items-center justify-between text-xs text-slate-600 dark:text-slate-400">
                   <span>{order.items.length} منتجات · {getGovernorateName(order.shippingAddress.governorate, language)}</span>
-                  <span className="text-sm font-black text-slate-900 tabular-nums">
+                  <span className="text-sm font-black text-slate-900 dark:text-white tabular-nums">
                     {order.totalAmount.toFixed(3)} {t.cart.currency}
                   </span>
                 </div>
@@ -263,10 +263,10 @@ export const CustomerPortal: React.FC = () => {
       {activeTab === 'addresses' && (
         <div className="space-y-4">
           <div className="flex justify-between items-center">
-            <h2 className="text-sm font-bold text-slate-900">عناوين التوصيل في ولايات تونس</h2>
+            <h2 className="text-sm font-bold text-slate-900 dark:text-white">عناوين التوصيل في ولايات تونس</h2>
             <button
               onClick={() => setShowAddAddress(!showAddAddress)}
-              className="px-3.5 py-1.5 rounded-xl bg-[#FF6B00] text-white text-xs font-bold flex items-center gap-1 shadow-xs hover:bg-[#e05e00]"
+              className="px-3.5 py-1.5 rounded-xl bg-[#FF6B00] text-white text-xs font-bold flex items-center gap-1 shadow-xs hover:bg-[#e05e00] cursor-pointer"
             >
               <Plus className="w-4 h-4" />
               <span>إضافة عنوان جديد</span>
@@ -275,8 +275,8 @@ export const CustomerPortal: React.FC = () => {
 
           {/* Add Address Form */}
           {showAddAddress && (
-            <form onSubmit={handleAddAddressSubmit} className="bg-white p-5 rounded-2xl border border-[#E8E4DD] space-y-3">
-              <h3 className="text-xs font-bold text-slate-800">بيانات العنوان الجديد</h3>
+            <form onSubmit={handleAddAddressSubmit} className="bg-white dark:bg-[#0F172A] p-5 rounded-2xl border border-[#E8E4DD] dark:border-slate-800 space-y-3">
+              <h3 className="text-xs font-bold text-slate-800 dark:text-white">بيانات العنوان الجديد</h3>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <input
                   type="text"
@@ -284,7 +284,7 @@ export const CustomerPortal: React.FC = () => {
                   placeholder="الاسم الكامل للمستلم"
                   value={newFullName}
                   onChange={e => setNewFullName(e.target.value)}
-                  className="w-full text-xs py-2 px-3 rounded-xl border border-slate-300"
+                  className="w-full text-xs py-2 px-3 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-[#1E293B] text-slate-900 dark:text-white"
                 />
                 <input
                   type="tel"
@@ -292,7 +292,7 @@ export const CustomerPortal: React.FC = () => {
                   placeholder="رقم الهاتف"
                   value={newPhone}
                   onChange={e => setNewPhone(e.target.value)}
-                  className="w-full text-xs py-2 px-3 rounded-xl border border-slate-300"
+                  className="w-full text-xs py-2 px-3 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-[#1E293B] text-slate-900 dark:text-white"
                   dir="ltr"
                 />
               </div>
@@ -301,7 +301,7 @@ export const CustomerPortal: React.FC = () => {
                 <select
                   value={newGovernorate}
                   onChange={e => setNewGovernorate(e.target.value)}
-                  className="w-full text-xs py-2 px-3 rounded-xl border border-slate-300 bg-white"
+                  className="w-full text-xs py-2 px-3 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-[#1E293B] text-slate-900 dark:text-white"
                 >
                   {TUNISIAN_GOVERNORATES.map(gov => (
                     <option key={gov.id} value={gov.id}>
@@ -315,14 +315,14 @@ export const CustomerPortal: React.FC = () => {
                   placeholder="المدينة / المعتمدية"
                   value={newCity}
                   onChange={e => setNewCity(e.target.value)}
-                  className="w-full text-xs py-2 px-3 rounded-xl border border-slate-300"
+                  className="w-full text-xs py-2 px-3 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-[#1E293B] text-slate-900 dark:text-white"
                 />
                 <input
                   type="text"
                   placeholder="الترقيم البريدي"
                   value={newPostalCode}
                   onChange={e => setNewPostalCode(e.target.value)}
-                  className="w-full text-xs py-2 px-3 rounded-xl border border-slate-300"
+                  className="w-full text-xs py-2 px-3 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-[#1E293B] text-slate-900 dark:text-white"
                 />
               </div>
 
@@ -332,20 +332,20 @@ export const CustomerPortal: React.FC = () => {
                 placeholder="النهج، الشارع، ورقم البناية"
                 value={newStreet}
                 onChange={e => setNewStreet(e.target.value)}
-                className="w-full text-xs py-2 px-3 rounded-xl border border-slate-300"
+                className="w-full text-xs py-2 px-3 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-[#1E293B] text-slate-900 dark:text-white"
               />
 
               <div className="flex justify-end gap-2 pt-2">
                 <button
                   type="button"
                   onClick={() => setShowAddAddress(false)}
-                  className="px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-100 rounded-xl"
+                  className="px-3 py-1.5 text-xs text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl cursor-pointer"
                 >
                   إلغاء
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-1.5 bg-[#0B0F17] hover:bg-[#FF6B00] text-white text-xs font-bold rounded-xl"
+                  className="px-4 py-1.5 bg-[#0B0F17] dark:bg-[#FF6B00] hover:bg-[#FF6B00] text-white text-xs font-bold rounded-xl cursor-pointer"
                 >
                   حفظ العنوان
                 </button>
@@ -358,12 +358,12 @@ export const CustomerPortal: React.FC = () => {
             {currentUser.addresses.map(addr => (
               <div 
                 key={addr.id} 
-                className={`p-4 rounded-2xl border-2 bg-white space-y-2 transition-all ${
-                  addr.isDefault ? 'border-[#FF6B00] shadow-xs' : 'border-slate-200'
+                className={`p-4 rounded-2xl border-2 bg-white dark:bg-[#0F172A] space-y-2 transition-all ${
+                  addr.isDefault ? 'border-[#FF6B00] shadow-xs' : 'border-slate-200 dark:border-slate-800'
                 }`}
               >
                 <div className="flex items-center justify-between">
-                  <span className="font-bold text-xs text-slate-900">{addr.fullName}</span>
+                  <span className="font-bold text-xs text-slate-900 dark:text-white">{addr.fullName}</span>
                   {addr.isDefault ? (
                     <span className="text-[10px] bg-[#FF6B00]/10 text-[#FF6B00] font-black px-2 py-0.5 rounded-full">
                       العنوان الافتراضي ✓
@@ -371,17 +371,17 @@ export const CustomerPortal: React.FC = () => {
                   ) : (
                     <button
                       onClick={() => setDefaultAddress(addr.id)}
-                      className="text-[11px] text-slate-500 hover:text-[#FF6B00]"
+                      className="text-[11px] text-slate-500 dark:text-slate-400 hover:text-[#FF6B00] cursor-pointer"
                     >
                       تعيين كافتراضي
                     </button>
                   )}
                 </div>
-                <p className="text-xs text-slate-600">
+                <p className="text-xs text-slate-600 dark:text-slate-300">
                   {getGovernorateName(addr.governorate, language)} · {addr.city} ({addr.postalCode})
                 </p>
-                <p className="text-xs text-slate-500">{addr.street}</p>
-                <p className="text-xs font-mono text-slate-700">{addr.phone}</p>
+                <p className="text-xs text-slate-500 dark:text-slate-400">{addr.street}</p>
+                <p className="text-xs font-mono text-slate-700 dark:text-slate-300">{addr.phone}</p>
               </div>
             ))}
           </div>
@@ -392,37 +392,37 @@ export const CustomerPortal: React.FC = () => {
       {activeTab === 'wishlist' && (
         <div className="space-y-4">
           {wishlistedProducts.length === 0 ? (
-            <div className="p-8 text-center bg-white rounded-3xl border border-slate-200 text-slate-500">
+            <div className="p-8 text-center bg-white dark:bg-[#0F172A] rounded-3xl border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400">
               قائمة المفضلة فارغة حالياً. يمكنك النقر على أيقونة القلب لأي منتج لحفظه هنا!
             </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {wishlistedProducts.map(prod => (
-                <div key={prod.id} className="bg-white p-4 rounded-2xl border border-slate-200 space-y-3 flex flex-col justify-between">
-                  <div className="flex gap-3">
+                <div key={prod.id} className="bg-white dark:bg-[#0F172A] p-4 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-3 flex flex-col justify-between">
+                  <div className="flex gap-3 cursor-pointer" onClick={() => setSelectedProductId(prod.id)}>
                     <img 
                       src={prod.images[0]} 
                       alt={prod.name[language]} 
                       referrerPolicy="no-referrer"
-                      className="w-16 h-16 rounded-xl object-cover bg-slate-100 shrink-0" 
+                      className="w-16 h-16 rounded-xl object-cover bg-slate-100 dark:bg-slate-800 shrink-0" 
                     />
                     <div className="overflow-hidden">
-                      <h4 className="text-xs font-bold text-slate-900 truncate">{prod.name[language]}</h4>
+                      <h4 className="text-xs font-bold text-slate-900 dark:text-white truncate">{prod.name[language]}</h4>
                       <p className="text-xs font-black text-[#FF6B00] tabular-nums mt-1">{prod.price.toFixed(3)} {t.cart.currency}</p>
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2 pt-2 border-t border-slate-100">
+                  <div className="flex items-center gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
                     <button
                       onClick={() => addToCart(prod, 1)}
-                      className="flex-1 py-2 bg-slate-900 hover:bg-[#FF6B00] text-white text-xs font-bold rounded-xl flex items-center justify-center gap-1 transition-colors"
+                      className="flex-1 py-2 bg-slate-900 dark:bg-[#FF6B00] hover:bg-[#FF6B00] dark:hover:bg-[#e05e00] text-white text-xs font-bold rounded-xl flex items-center justify-center gap-1 transition-colors cursor-pointer"
                     >
                       <ShoppingBag className="w-3.5 h-3.5" />
                       <span>{t.product.addToCart}</span>
                     </button>
                     <button
                       onClick={() => toggleWishlist(prod.id)}
-                      className="p-2 border border-slate-200 hover:text-red-600 rounded-xl"
+                      className="p-2 border border-slate-200 dark:border-slate-700 hover:text-red-600 rounded-xl cursor-pointer"
                       title="إزالة من المفضلة"
                     >
                       <Trash2 className="w-3.5 h-3.5" />

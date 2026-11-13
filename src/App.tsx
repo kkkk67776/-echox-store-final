@@ -3,23 +3,32 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense, lazy } from 'react';
 import { StoreProvider, useStore } from './context/StoreContext';
 import { Header } from './components/Header';
 import { StorefrontView } from './components/StorefrontView';
 import { ProductDetailModal } from './components/ProductDetailModal';
 import { CartDrawer } from './components/CartDrawer';
-import { CheckoutModal } from './components/CheckoutModal';
-import { SupportEchoxModal } from './components/SupportEchoxModal';
-import { OrderTrackingView } from './components/OrderTrackingView';
-import { CustomerPortal } from './components/CustomerPortal';
-import { OwnerDashboard } from './components/OwnerDashboard';
-import OwnerSecurityRoom from './components/security/OwnerSecurityRoom';
-import { PromiseView, CompaniesView, ContactView } from './components/StaticPages';
 import { FloatingActions } from './components/FloatingActions';
 import { Footer } from './components/Footer';
 import { BottomNavigation } from './components/BottomNavigation';
 import { applySeo } from './lib/seo';
+
+const CheckoutModal = lazy(() => import('./components/CheckoutModal').then(m => ({ default: m.CheckoutModal })));
+const SupportEchoxModal = lazy(() => import('./components/SupportEchoxModal').then(m => ({ default: m.SupportEchoxModal })));
+const OrderTrackingView = lazy(() => import('./components/OrderTrackingView').then(m => ({ default: m.OrderTrackingView })));
+const CustomerPortal = lazy(() => import('./components/CustomerPortal').then(m => ({ default: m.CustomerPortal })));
+const OwnerDashboard = lazy(() => import('./components/OwnerDashboard').then(m => ({ default: m.OwnerDashboard })));
+const OwnerSecurityRoom = lazy(() => import('./components/security/OwnerSecurityRoom'));
+const PromiseView = lazy(() => import('./components/StaticPages').then(m => ({ default: m.PromiseView })));
+const CompaniesView = lazy(() => import('./components/StaticPages').then(m => ({ default: m.CompaniesView })));
+const ContactView = lazy(() => import('./components/StaticPages').then(m => ({ default: m.ContactView })));
+
+const RouteFallback: React.FC = () => (
+  <div className="min-h-[45vh] flex items-center justify-center">
+    <div className="w-8 h-8 rounded-full border-3 border-[#FF6B00]/25 border-t-[#FF6B00] animate-spin" />
+  </div>
+);
 
 const AppContent: React.FC = () => {
   const {
@@ -95,7 +104,6 @@ const AppContent: React.FC = () => {
     if (state) {
       setNavState(state);
     }
-    // Update view and browser URL
     const urlPath = route.startsWith('/') ? route : `/${route}`;
     if (window.location.pathname !== urlPath) {
       window.history.pushState(state || {}, '', urlPath);
@@ -104,46 +112,49 @@ const AppContent: React.FC = () => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  // Determine current active view:
-  const isOwnerRoute = 
-    currentView === '/owner/dashboard' || 
+  const isOwnerRoute =
+    currentView === '/owner/dashboard' ||
     currentView === 'owner_dashboard';
 
   return (
     <div className="min-h-screen flex flex-col bg-white dark:bg-[#0B0F17] text-[#0F172A] dark:text-slate-100 selection:bg-[#FF6B00] selection:text-white transition-colors overflow-x-hidden max-w-[100vw] w-full">
-      {/* 1. Header with original logo and language controls */}
+      {/* 1. Header */}
       <Header />
 
       {/* 2. Main View Router */}
       <main className="flex-1 w-full max-w-full overflow-x-hidden">
-        {/* Owner Dashboard (Unlocked exclusively via secret code & ECHOX VAULT PIN) */}
-        {isOwnerRoute && (
-          <OwnerDashboard onNavigate={handleNavigate} />
-        )}
+        <Suspense fallback={<RouteFallback />}>
+          {isOwnerRoute && (
+            <OwnerDashboard onNavigate={handleNavigate} />
+          )}
 
-        {/* Customer & Storefront Views */}
-        {!isOwnerRoute && (
-          <>
-            {(currentView === 'store' || currentView === '/') && <StorefrontView />}
-            {currentView === 'promise' && <PromiseView />}
-            {currentView === 'companies' && <CompaniesView />}
-            {currentView === 'my_orders' && <OrderTrackingView />}
-            {(currentView === 'account' || currentView === 'wishlist') && <CustomerPortal />}
-            {currentView === 'contact' && <ContactView />}
-          </>
-        )}
+          {!isOwnerRoute && (
+            <>
+              {(currentView === 'store' || currentView === '/') && <StorefrontView />}
+              {currentView === 'promise' && <PromiseView />}
+              {currentView === 'companies' && <CompaniesView />}
+              {currentView === 'my_orders' && <OrderTrackingView />}
+              {(currentView === 'account' || currentView === 'wishlist') && <CustomerPortal />}
+              {currentView === 'contact' && <ContactView />}
+            </>
+          )}
+        </Suspense>
       </main>
 
       {/* 3. Global Drawers & Modals */}
       <ProductDetailModal />
       <CartDrawer onOpenCheckout={() => setIsCheckoutOpen(true)} />
-      <CheckoutModal isOpen={isCheckoutOpen} onClose={() => setIsCheckoutOpen(false)} />
-      <SupportEchoxModal />
-      <OwnerSecurityRoom 
-        onUnlockSuccess={() => handleNavigate('/owner/dashboard')} 
-        onNavigate={handleNavigate} 
-      />
-      
+      <Suspense fallback={null}>
+        {isCheckoutOpen && (
+          <CheckoutModal isOpen={isCheckoutOpen} onClose={() => setIsCheckoutOpen(false)} />
+        )}
+        <SupportEchoxModal />
+        <OwnerSecurityRoom
+          onUnlockSuccess={() => handleNavigate('/owner/dashboard')}
+          onNavigate={handleNavigate}
+        />
+      </Suspense>
+
       {/* 4. Floating Communication Buttons */}
       <FloatingActions />
 

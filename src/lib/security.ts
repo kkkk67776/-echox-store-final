@@ -357,7 +357,6 @@ export async function logoutAllDevices(): Promise<boolean> {
 // Backward compatibility helpers
 export const isSecurityCodeVerified = isOwnerUnlocked;
 export const setSecurityCodeVerified = setOwnerUnlocked;
-export const DEFAULT_MASTER_CODE = '570216';
 
 export async function createOwnerSessionCall(email: string, customToken?: string) {
   try {
@@ -369,7 +368,7 @@ export async function createOwnerSessionCall(email: string, customToken?: string
     });
     return await res.json();
   } catch {
-    return { success: true };
+    return { success: false };
   }
 }
 
@@ -424,6 +423,7 @@ export async function verifyAccessCodeServer(code: string): Promise<{
     const res = await fetch('/api/security/verifyAccessCode', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
       body: JSON.stringify({ code: code.trim() })
     });
     const data = await res.json();
@@ -446,6 +446,7 @@ export async function verifyPinServer(pin: string): Promise<{
     const res = await fetch('/api/security/verifyPin', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
       body: JSON.stringify({ pin: pin.trim() })
     });
     const data = await res.json();
@@ -468,11 +469,12 @@ export async function updateAccessCodeServer(currentPinOrCode: string, newCode: 
     const res = await fetch('/api/security/updateAccessCode', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
       body: JSON.stringify({ currentPinOrCode, newCode })
     });
     const data = await res.json();
     return data;
-  } catch (err) {
+  } catch {
     return { success: false, error: 'تعذر تحديث رمز الوصول على الخادم.' };
   }
 }
@@ -486,11 +488,12 @@ export async function updatePinServer(currentPin: string, newPin: string): Promi
     const res = await fetch('/api/security/updatePin', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
       body: JSON.stringify({ currentPin, newPin })
     });
     const data = await res.json();
     return data;
-  } catch (err) {
+  } catch {
     return { success: false, error: 'تعذر تحديث رمز الـ PIN على الخادم.' };
   }
 }
@@ -500,7 +503,7 @@ export async function fetchActiveSessions(): Promise<{
   securityEngine: string;
 }> {
   try {
-    const res = await fetch('/api/security/sessions');
+    const res = await fetch('/api/security/sessions', { credentials: 'same-origin' });
     if (res.ok) {
       return await res.json();
     }
@@ -510,7 +513,10 @@ export async function fetchActiveSessions(): Promise<{
 
 export async function revokeAllSessionsServer(): Promise<{ success: boolean; message: string }> {
   try {
-    const res = await fetch('/api/security/logoutAllDevices', { method: 'POST' });
+    const res = await fetch('/api/security/logoutAllDevices', {
+      method: 'POST',
+      credentials: 'same-origin'
+    });
     return await res.json();
   } catch {
     return { success: false, message: 'فشل إنهاء الجلسات.' };
@@ -519,7 +525,7 @@ export async function revokeAllSessionsServer(): Promise<{ success: boolean; mes
 
 export async function fetchSecuritySystemStatus(): Promise<any> {
   try {
-    const res = await fetch('/api/security/systemStatus');
+    const res = await fetch('/api/security/systemStatus', { credentials: 'same-origin' });
     if (res.ok) return await res.json();
   } catch {}
   return { argon2idEnabled: true, serverSideEnforced: true };

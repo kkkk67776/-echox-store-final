@@ -85,34 +85,48 @@ export const StorefrontView: React.FC = () => {
       <div className="max-w-7xl mx-auto px-2.5 sm:px-4 pt-2">
         {banners && banners.filter(b => b.active).length > 0 ? (
           <div className="space-y-2">
-            {banners.filter(b => b.active).map(b => (
-              <div 
-                key={b.id} 
-                className={`rounded-3xl bg-gradient-to-r ${b.bgGradient || 'from-[#FF6B00] via-[#F97316] to-[#EA580C]'} text-white p-3 sm:p-4 shadow-xs flex items-center justify-between gap-3 overflow-hidden relative`}
-              >
-                <div className="flex items-center gap-2.5 z-10">
-                  <span className="w-8 h-8 rounded-2xl bg-white/20 flex items-center justify-center shrink-0">
-                    <Sparkles className="w-4 h-4 text-white" />
-                  </span>
-                  <div>
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <span className="text-[10px] font-black uppercase tracking-wider bg-white text-[#FF6B00] px-2.5 py-0.5 rounded-full shadow-2xs">
-                        {b.tag || 'عروض حصرية'}
-                      </span>
-                      <span className="text-xs sm:text-sm font-black text-white">
-                        {b.title}
-                      </span>
+            {banners.filter(b => b.active).map(b => {
+              const displayTag =
+                b.id === 'banner_1' || b.tag === 'عروض حصرية'
+                  ? t.storefront?.defaultBannerTag || b.tag
+                  : b.tag || t.storefront?.defaultBannerTag;
+              const displayTitle =
+                b.id === 'banner_1' || b.title === 'عروض وتخفيضات اليوم على كافة المعدات وقطع الغيار'
+                  ? t.storefront?.defaultBannerTitle || b.title
+                  : b.title;
+              const displaySubtitle =
+                b.id === 'banner_1' || b.subtitle === 'توصيل سريع لكافة الـ24 ولاية والدفع عند المعاينة والاستلام'
+                  ? t.storefront?.defaultBannerSubtitle || b.subtitle
+                  : b.subtitle;
+              return (
+                <div 
+                  key={b.id} 
+                  className={`rounded-3xl bg-gradient-to-r ${b.bgGradient || 'from-[#FF6B00] via-[#F97316] to-[#EA580C]'} text-white p-3 sm:p-4 shadow-xs flex items-center justify-between gap-3 overflow-hidden relative`}
+                >
+                  <div className="flex items-center gap-2.5 z-10">
+                    <span className="w-8 h-8 rounded-2xl bg-white/20 flex items-center justify-center shrink-0">
+                      <Sparkles className="w-4 h-4 text-white" />
+                    </span>
+                    <div>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="text-[10px] font-black uppercase tracking-wider bg-white text-[#FF6B00] px-2.5 py-0.5 rounded-full shadow-2xs">
+                          {displayTag}
+                        </span>
+                        <span className="text-xs sm:text-sm font-black text-white">
+                          {displayTitle}
+                        </span>
+                      </div>
+                      {displaySubtitle && (
+                        <p className="text-[11px] text-white/90 hidden xs:block mt-0.5">
+                          {displaySubtitle}
+                        </p>
+                      )}
                     </div>
-                    {b.subtitle && (
-                      <p className="text-[11px] text-white/90 hidden xs:block mt-0.5">
-                        {b.subtitle}
-                      </p>
-                    )}
                   </div>
+                  <div className="absolute -left-10 -bottom-10 w-28 h-28 rounded-full bg-white/10 blur-xl pointer-events-none"></div>
                 </div>
-                <div className="absolute -left-10 -bottom-10 w-28 h-28 rounded-full bg-white/10 blur-xl pointer-events-none"></div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         ) : (
           <div className="rounded-3xl bg-gradient-to-r from-[#FF6B00] via-[#F97316] to-[#EA580C] text-white p-3 sm:p-4 shadow-xs flex items-center justify-between gap-3 overflow-hidden relative">
@@ -188,8 +202,8 @@ export const StorefrontView: React.FC = () => {
                           className="w-full h-full object-contain group-hover:scale-105 transition-transform duration-300"
                         />
                         {product.originalPrice && product.originalPrice > product.price && (
-                          <span className="absolute top-1.5 right-1.5 bg-[#FF6B00] text-white text-[9px] font-black px-1.5 py-0.5 rounded-md">
-                            تخفيض
+                          <span className={`absolute top-1.5 ${language === 'ar' ? 'right-1.5' : 'left-1.5'} bg-[#FF6B00] text-white text-[9px] font-black px-1.5 py-0.5 rounded-md`}>
+                            {t.storefront?.discountBadge || 'تخفيض'}
                           </span>
                         )}
                       </div>
@@ -223,7 +237,7 @@ export const StorefrontView: React.FC = () => {
                         className={`w-7 h-7 rounded-xl flex items-center justify-center transition-all cursor-pointer active:scale-95 ${
                           isAdded ? 'bg-emerald-600 text-white' : 'bg-[#FF6B00] hover:bg-[#E05E00] text-white shadow-xs'
                         }`}
-                        title="أضف للسلة"
+                        title={t.product?.addToCart || 'أضف للسلة'}
                       >
                         {isAdded ? <Check className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
                       </button>

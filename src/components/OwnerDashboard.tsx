@@ -47,6 +47,7 @@ import { db } from '../lib/firebase';
 import { Product, Company, Order, OrderStatus, CategoryItem, PromoBanner, SiteSettings } from '../types';
 import { INITIAL_SITE_SETTINGS } from '../data/initialData';
 import { PaymentManagementTab } from './PaymentManagementTab';
+import { SupportChatTab } from './SupportChatTab';
 import { canOrderShipClient, getPaymentStatusTone } from '../lib/payments';
 import { TUNISIAN_GOVERNORATES, getGovernorateName } from '../data/governorates';
 import { 
@@ -81,7 +82,8 @@ type DashboardTab =
   | 'categories'
   | 'partners'
   | 'banners'
-  | 'orders';
+  | 'orders'
+  | 'support_chat';
 
 export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) => {
   const navigate = (route: string, state?: any) => {
@@ -987,6 +989,19 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
           <ShoppingBag className="w-3.5 h-3.5" />
           <span>الطلبات والمبيعات ({orders.length})</span>
         </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('support_chat')}
+          className={`px-4 py-2 rounded-full text-xs font-bold shrink-0 transition-all cursor-pointer flex items-center gap-1.5 active:scale-95 ${
+            activeTab === 'support_chat'
+              ? 'bg-[#FF6B00] text-white shadow-xs'
+              : 'bg-[#F8FAFC] dark:bg-[#1E293B] text-slate-700 dark:text-slate-200 border border-[#E2E8F0] dark:border-slate-800 hover:border-slate-400'
+          }`}
+        >
+          <MessageCircle className="w-3.5 h-3.5" />
+          <span>شات الدعم المباشر</span>
+        </button>
       </div>
 
       {/* ========================================================= */}
@@ -1182,7 +1197,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
                 <div>
                   <h3 className="text-sm font-black">إدارة رمز الوصول السري (Access Code Management)</h3>
                   <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                    الرمز الأولي المكتوب في شريط البحث لاستدعاء بوابة PIN (الافتراضي: <span className="font-mono text-[#FF6B00]">#echox_vault_99</span>)
+                    الرمز السري المكتوب في شريط البحث لاستدعاء بوابة PIN (يتم التحقق منه وتحديثه حصرياً على الخادم)
                   </p>
                 </div>
               </div>
@@ -2528,6 +2543,9 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
           </div>
         </div>
       )}
+
+      {/* Tab 9: Live Support Chat & Reply Customization */}
+      {activeTab === 'support_chat' && <SupportChatTab />}
 
       {/* ========================================================= */}
       {/* 5. Modals for Adding Entities */}

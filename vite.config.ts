@@ -20,6 +20,23 @@ export default defineConfig(() => {
       sourcemap: false,
       rolldownOptions: {
         output: {
+          // Split heavy vendor SDKs cleanly for faster storefront mobile caching
+          codeSplitting: {
+            groups: [
+              {
+                name: 'firebase',
+                test: /node_modules[\\/]firebase|node_modules[\\/]@firebase/,
+              },
+              {
+                name: 'react',
+                test: /node_modules[\\/](react|react-dom|react-router|scheduler)/,
+              },
+              {
+                name: 'motion',
+                test: /node_modules[\\/](motion|framer-motion|lucide-react)/,
+              },
+            ],
+          },
           // Aggressive minification + identifier mangling to make the shipped code hard to read,
           // and strip console/debugger statements that can leak internal details.
           minify: {

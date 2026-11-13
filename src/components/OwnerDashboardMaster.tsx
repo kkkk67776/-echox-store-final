@@ -133,7 +133,7 @@ export default function OwnerDashboardMaster() {
   const handleAddPartner = (e: React.FormEvent) => {
     e.preventDefault();
     if (!partnerName || !partnerPhone) {
-      alert('يرجى ملء الحقول الأساسية (اسم الشركة ورقم الهاتف)');
+      setSuccessMsg('يرجى ملء الحقول الأساسية (اسم الشركة ورقم الهاتف)');
       return;
     }
 
@@ -167,7 +167,7 @@ export default function OwnerDashboardMaster() {
   const handleAddProduct = (e: React.FormEvent) => {
     e.preventDefault();
     if (!prodName || !prodPrice) {
-      alert('يرجى ملء اسم المنتج والسعر');
+      setSuccessMsg('يرجى ملء اسم المنتج والسعر');
       return;
     }
 

@@ -18,8 +18,17 @@ import {
   PromoBanner,
   PaymentMethodType,
   PaymentSystemPublicConfig,
-  TransferProof
+  TransferProof,
+  SupportChatConfig,
+  ChatSuggestedProduct
 } from '../types';
+import {
+  DEFAULT_CHAT_CONFIG,
+  fetchChatThreadServer,
+  fetchPublicChatConfig,
+  generateSmartStoreReply,
+  pushChatExchangeServer
+} from '../lib/supportChatEngine';
 import {
   DEFAULT_PUBLIC_PAYMENT_CONFIG,
   fetchPublicPaymentConfig,
@@ -152,7 +161,13 @@ interface StoreContextType {
   sendInquiry: (inquiry: Omit<ContactInquiry, 'id' | 'createdAt' | 'read'>) => void;
   replyToInquiry: (inquiryId: string, reply: string) => void;
   chatMessages: ChatMessage[];
-  sendChatMessage: (text: string, sender: 'customer' | 'owner') => void;
+  chatConfig: SupportChatConfig;
+  isChatReplying: boolean;
+  sendChatMessage: (text: string, sender: 'customer' | 'owner', extra?: { suggestedProducts?: ChatSuggestedProduct[]; actionView?: string; source?: 'auto' | 'owner' | 'customer' }) => void;
+  sendCustomerSupportMessage: (text: string) => Promise<void>;
+  refreshChatThread: () => Promise<void>;
+  refreshChatConfig: () => Promise<void>;
+  resetChatSession: () => void;
   
   // Settings
   siteSettings: SiteSettings;
@@ -225,14 +240,46 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const t = getTranslation(language);
 
-  // 2. Navigation & Views
-  const [currentView, setCurrentView] = useState<string>('store');
-  const [selectedProductId, setSelectedProductId] = useState<string | null>(null);
+  // 2. Navigation & Views (with clean browser URL sync)
+  const [currentView, setCurrentViewState] = useState<string>('store');
+  const [selectedProductId, setSelectedProductIdState] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [isCartOpen, setIsCartOpen] = useState<boolean>(false);
   const [isSupportModalOpen, setIsSupportModalOpen] = useState<boolean>(false);
   const [paymentConfig, setPaymentConfig] = useState<PaymentSystemPublicConfig>(DEFAULT_PUBLIC_PAYMENT_CONFIG);
+
+  const setCurrentView = (view: string) => {
+    setCurrentViewState(view);
+    if (typeof window !== 'undefined') {
+      const targetPath =
+        view === 'store' || view === '/'
+          ? '/'
+          : view.startsWith('/')
+          ? view
+          : `/${view}`;
+      const currentSearch = view === 'store' ? window.location.search : '';
+      if (window.location.pathname !== targetPath) {
+        window.history.pushState({}, '', `${targetPath}${currentSearch}`);
+      }
+    }
+  };
+
+  const setSelectedProductId = (id: string | null) => {
+    setSelectedProductIdState(id);
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href);
+      if (id) {
+        url.searchParams.set('product', id);
+      } else {
+        url.searchParams.delete('product');
+      }
+      const nextUrl = `${url.pathname}${url.search}`;
+      if (`${window.location.pathname}${window.location.search}` !== nextUrl) {
+        window.history.replaceState({}, '', nextUrl);
+      }
+    }
+  };
 
   const refreshPaymentConfig = async () => {
     try {
@@ -1044,23 +1091,165 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }));
   };
 
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
-    {
-      id: 'msg_welcome',
-      sender: 'owner',
-      text: 'مرحباً بك في ECHOX Store! كيف يمكننا مساعدتك اليوم بخصوص الأجهزة، القطع الأصلية، أو التوصيل لولايتك؟',
-      timestamp: '2026-11-06T08:00:00Z'
-    }
-  ]);
+  const [chatConfig, setChatConfig] = useState<SupportChatConfig>(DEFAULT_CHAT_CONFIG);
+  const [isChatReplying, setIsChatReplying] = useState(false);
 
-  const sendChatMessage = (text: string, sender: 'customer' | 'owner') => {
+  const [chatSessionId, setChatSessionId] = useState<string>(() => {
+    try {
+      const existing = localStorage.getItem('echox_chat_session_id');
+      if (existing && existing.length >= 6) return existing;
+    } catch {
+      // ignore
+    }
+    const generated = `sess_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    try {
+      localStorage.setItem('echox_chat_session_id', generated);
+    } catch {
+      // ignore
+    }
+    return generated;
+  });
+
+  const buildWelcomeMessage = (lang: Language, cfg: SupportChatConfig): ChatMessage => ({
+    id: 'msg_welcome',
+    sender: 'owner',
+    source: 'auto',
+    text: cfg.welcomeMessage[lang] || cfg.welcomeMessage.ar || DEFAULT_CHAT_CONFIG.welcomeMessage[lang],
+    timestamp: new Date().toISOString(),
+  });
+
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>(() => {
+    try {
+      const saved = localStorage.getItem('echox_chat_messages');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch {
+      // ignore
+    }
+    return [buildWelcomeMessage(language, DEFAULT_CHAT_CONFIG)];
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('echox_chat_messages', JSON.stringify(chatMessages));
+    } catch {
+      // ignore
+    }
+  }, [chatMessages]);
+
+  // Update untouched default welcome message whenever user switches AR / FR / EN
+  useEffect(() => {
+    setChatMessages(prev => {
+      if (prev.length === 1 && prev[0].id === 'msg_welcome') {
+        const nextText = chatConfig.welcomeMessage[language] || chatConfig.welcomeMessage.ar;
+        if (prev[0].text !== nextText) {
+          return [{ ...prev[0], text: nextText }];
+        }
+      }
+      return prev;
+    });
+  }, [language, chatConfig]);
+
+  const refreshChatConfig = async () => {
+    const cfg = await fetchPublicChatConfig();
+    if (cfg) setChatConfig(cfg);
+  };
+
+  const refreshChatThread = async () => {
+    const remoteThread = await fetchChatThreadServer(chatSessionId);
+    if (remoteThread && Array.isArray(remoteThread.messages) && remoteThread.messages.length > 0) {
+      setChatMessages(remoteThread.messages);
+    }
+  };
+
+  useEffect(() => {
+    refreshChatConfig();
+    refreshChatThread();
+  }, []);
+
+  const sendChatMessage = (
+    text: string,
+    sender: 'customer' | 'owner',
+    extra?: { suggestedProducts?: ChatSuggestedProduct[]; actionView?: string; source?: 'auto' | 'owner' | 'customer' }
+  ) => {
     const msg: ChatMessage = {
-      id: `chat_${Date.now()}`,
+      id: `chat_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
       sender,
+      source: extra?.source || (sender === 'customer' ? 'customer' : 'owner'),
       text,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      suggestedProducts: extra?.suggestedProducts,
+      actionView: extra?.actionView,
     };
     setChatMessages(prev => [...prev, msg]);
+  };
+
+  const sendCustomerSupportMessage = async (rawText: string) => {
+    const trimmed = rawText.trim();
+    if (!trimmed) return;
+
+    const customerMsg: ChatMessage = {
+      id: `chat_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      sender: 'customer',
+      source: 'customer',
+      text: trimmed,
+      timestamp: new Date().toISOString(),
+    };
+    setChatMessages(prev => [...prev, customerMsg]);
+
+    const reply = chatConfig.autoReplyEnabled
+      ? generateSmartStoreReply({
+          message: trimmed,
+          language,
+          products,
+          companies,
+          orders,
+          siteSettings,
+          paymentConfig,
+          chatConfig,
+        })
+      : null;
+
+    if (reply) {
+      setIsChatReplying(true);
+      await new Promise(resolve => setTimeout(resolve, 350));
+      const autoMsg: ChatMessage = {
+        id: `chat_auto_${Date.now() + 1}`,
+        sender: 'owner',
+        source: 'auto',
+        text: reply.text,
+        timestamp: new Date().toISOString(),
+        suggestedProducts: reply.suggestedProducts,
+        actionView: reply.actionView,
+      };
+      setChatMessages(prev => [...prev, autoMsg]);
+      setIsChatReplying(false);
+    }
+
+    const serverThread = await pushChatExchangeServer({
+      sessionId: chatSessionId,
+      language,
+      customerText: trimmed,
+      autoReplyText: reply?.text,
+      suggestedProducts: reply?.suggestedProducts,
+      actionView: reply?.actionView,
+    });
+    if (serverThread && Array.isArray(serverThread.messages) && serverThread.messages.length > 0) {
+      setChatMessages(serverThread.messages);
+    }
+  };
+
+  const resetChatSession = () => {
+    const nextId = `sess_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    try {
+      localStorage.setItem('echox_chat_session_id', nextId);
+    } catch {
+      // ignore
+    }
+    setChatSessionId(nextId);
+    setChatMessages([buildWelcomeMessage(language, chatConfig)]);
   };
 
   return (
@@ -1144,7 +1333,13 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       sendInquiry,
       replyToInquiry,
       chatMessages,
+      chatConfig,
+      isChatReplying,
       sendChatMessage,
+      sendCustomerSupportMessage,
+      refreshChatThread,
+      refreshChatConfig,
+      resetChatSession,
       
       siteSettings,
       updateSiteSettings,

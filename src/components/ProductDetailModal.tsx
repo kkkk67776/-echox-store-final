@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useStore } from '../context/StoreContext';
 import { 
   X, 
@@ -40,6 +40,12 @@ export const ProductDetailModal: React.FC = () => {
   const [reviewComment, setReviewComment] = useState('');
   const [showReviewSuccess, setShowReviewSuccess] = useState(false);
   const [shareCopied, setShareCopied] = useState(false);
+
+  useEffect(() => {
+    setActiveImageIndex(0);
+    setQuantity(1);
+    setShareCopied(false);
+  }, [selectedProductId]);
 
   if (!product) return null;
 
@@ -223,10 +229,10 @@ export const ProductDetailModal: React.FC = () => {
                     >
                       <Minus className="w-4 h-4" />
                     </button>
-                    <span className="px-4 text-sm font-bold tabular-nums text-slate-900">{quantity}</span>
+                    <span className="px-4 text-sm font-bold tabular-nums text-slate-900 dark:text-white">{quantity}</span>
                     <button
                       onClick={() => setQuantity(Math.min(product.stock, quantity + 1))}
-                      className="p-2 text-slate-600 hover:bg-slate-100 transition-colors"
+                      className="p-2 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
                       aria-label="Increase quantity"
                     >
                       <Plus className="w-4 h-4" />
@@ -287,15 +293,15 @@ export const ProductDetailModal: React.FC = () => {
 
               {/* Specs Table */}
               {product.specs && product.specs.length > 0 && (
-                <div className="border border-slate-200 rounded-2xl overflow-hidden text-xs">
-                  <div className="bg-slate-100 px-4 py-2 font-bold text-slate-800">
+                <div className="border border-slate-200 dark:border-slate-700 rounded-2xl overflow-hidden text-xs">
+                  <div className="bg-slate-100 dark:bg-slate-800 px-4 py-2 font-bold text-slate-800 dark:text-slate-100">
                     {t.product.specs}
                   </div>
-                  <div className="divide-y divide-slate-100 bg-white">
+                  <div className="divide-y divide-slate-100 dark:divide-slate-800 bg-white dark:bg-[#1E293B]">
                     {product.specs.map((spec, i) => (
                       <div key={i} className="grid grid-cols-2 px-4 py-2.5">
-                        <span className="text-slate-500 font-medium">{spec.key[language]}</span>
-                        <span className="font-semibold text-slate-900">{spec.value[language]}</span>
+                        <span className="text-slate-500 dark:text-slate-400 font-medium">{spec.key[language]}</span>
+                        <span className="font-semibold text-slate-900 dark:text-white">{spec.value[language]}</span>
                       </div>
                     ))}
                   </div>
@@ -306,21 +312,21 @@ export const ProductDetailModal: React.FC = () => {
           </div>
 
           {/* Description Section */}
-          <div className="pt-6 border-t border-slate-200 space-y-3">
-            <h2 className="text-lg font-bold text-slate-900">{t.product.description}</h2>
-            <p className="text-sm sm:text-base text-slate-700 leading-relaxed max-w-3xl">
+          <div className="pt-6 border-t border-slate-200 dark:border-slate-800 space-y-3">
+            <h2 className="text-lg font-bold text-slate-900 dark:text-white">{t.product.description}</h2>
+            <p className="text-sm sm:text-base text-slate-700 dark:text-slate-300 leading-relaxed max-w-3xl">
               {product.description[language]}
             </p>
           </div>
 
           {/* Customer Reviews & Add Review Section */}
-          <div className="pt-6 border-t border-slate-200 space-y-6">
+          <div className="pt-6 border-t border-slate-200 dark:border-slate-800 space-y-6">
             <div className="flex items-center justify-between">
-              <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+              <h2 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
                 <MessageSquare className="w-5 h-5 text-[#FF6B00]" />
                 <span>{t.product.reviews}</span>
               </h2>
-              <span className="text-xs text-slate-500">
+              <span className="text-xs text-slate-500 dark:text-slate-400">
                 {product.reviews.length} {t.product.reviewSingular}
               </span>
             </div>
@@ -328,15 +334,15 @@ export const ProductDetailModal: React.FC = () => {
             {/* Existing Reviews List */}
             <div className="space-y-3">
               {product.reviews.length === 0 ? (
-                <p className="text-sm text-slate-500 py-3">{t.product.noReviewsYet}</p>
+                <p className="text-sm text-slate-500 dark:text-slate-400 py-3">{t.product.noReviewsYet}</p>
               ) : (
                 product.reviews.map(rev => (
-                  <div key={rev.id} className="p-4 rounded-xl bg-[#FAF8F5] border border-slate-200 space-y-2">
+                  <div key={rev.id} className="p-4 rounded-xl bg-[#FAF8F5] dark:bg-[#1E293B] border border-slate-200 dark:border-slate-700 space-y-2">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
-                        <span className="font-bold text-sm text-slate-900">{rev.authorName}</span>
+                        <span className="font-bold text-sm text-slate-900 dark:text-white">{rev.authorName}</span>
                         {rev.verifiedPurchase && (
-                          <span className="text-[11px] bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full font-medium">
+                          <span className="text-[11px] bg-emerald-100 dark:bg-emerald-900/40 text-emerald-800 dark:text-emerald-300 px-2 py-0.5 rounded-full font-medium">
                             {t.product.verifiedPurchase}
                           </span>
                         )}
@@ -345,12 +351,12 @@ export const ProductDetailModal: React.FC = () => {
                         {[...Array(5)].map((_, i) => (
                           <Star 
                             key={i} 
-                            className={`w-3.5 h-3.5 ${i < rev.rating ? 'fill-amber-500' : 'text-slate-300'}`} 
+                            className={`w-3.5 h-3.5 ${i < rev.rating ? 'fill-amber-500' : 'text-slate-300 dark:text-slate-600'}`} 
                           />
                         ))}
                       </div>
                     </div>
-                    <p className="text-xs sm:text-sm text-slate-700">{rev.comment}</p>
+                    <p className="text-xs sm:text-sm text-slate-700 dark:text-slate-300">{rev.comment}</p>
                     <span className="text-[11px] text-slate-400 block">{rev.date}</span>
                   </div>
                 ))
@@ -358,32 +364,32 @@ export const ProductDetailModal: React.FC = () => {
             </div>
 
             {/* Add Review Form */}
-            <div className="p-5 rounded-2xl bg-white border border-[#E8E4DD] space-y-4">
-              <h3 className="text-sm font-bold text-slate-900">{t.product.addReviewTitle}</h3>
+            <div className="p-5 rounded-2xl bg-white dark:bg-[#1E293B] border border-[#E8E4DD] dark:border-slate-700 space-y-4">
+              <h3 className="text-sm font-bold text-slate-900 dark:text-white">{t.product.addReviewTitle}</h3>
               {showReviewSuccess && (
-                <div className="p-3 bg-emerald-50 text-emerald-800 rounded-xl text-xs font-bold">
+                <div className="p-3 bg-emerald-50 dark:bg-emerald-900/30 text-emerald-800 dark:text-emerald-300 rounded-xl text-xs font-bold">
                   {t.product.reviewSubmitted}
                 </div>
               )}
               <form onSubmit={handleReviewSubmit} className="space-y-3">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">{t.product.yourName}</label>
+                    <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">{t.product.yourName}</label>
                     <input 
                       type="text" 
                       required 
                       value={reviewAuthor} 
                       onChange={e => setReviewAuthor(e.target.value)} 
                       placeholder={t.product.namePlaceholder} 
-                      className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 focus:outline-hidden focus:border-[#FF6B00]" 
+                      className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0F172A] text-slate-900 dark:text-white focus:outline-hidden focus:border-[#FF6B00]" 
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">{t.product.yourRating}</label>
+                    <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">{t.product.yourRating}</label>
                     <select 
                       value={reviewRating} 
                       onChange={e => setReviewRating(Number(e.target.value))}
-                      className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 focus:outline-hidden focus:border-[#FF6B00] bg-white"
+                      className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0F172A] text-slate-900 dark:text-white focus:outline-hidden focus:border-[#FF6B00]"
                     >
                       <option value="5">{t.product.rating5}</option>
                       <option value="4">{t.product.rating4}</option>
@@ -394,19 +400,19 @@ export const ProductDetailModal: React.FC = () => {
                   </div>
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">{t.product.yourComment}</label>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">{t.product.yourComment}</label>
                   <textarea 
                     required 
                     rows={2} 
                     value={reviewComment} 
                     onChange={e => setReviewComment(e.target.value)} 
                     placeholder={t.product.commentPlaceholder} 
-                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 focus:outline-hidden focus:border-[#FF6B00]" 
+                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0F172A] text-slate-900 dark:text-white focus:outline-hidden focus:border-[#FF6B00]" 
                   />
                 </div>
                 <button 
                   type="submit" 
-                  className="px-4 py-2 rounded-xl bg-[#0B0F17] hover:bg-[#FF6B00] text-white text-xs font-bold transition-colors"
+                  className="px-4 py-2 rounded-xl bg-[#0B0F17] dark:bg-[#FF6B00] hover:bg-[#FF6B00] dark:hover:bg-[#E05E00] text-white text-xs font-bold transition-colors cursor-pointer"
                 >
                   {t.product.submitReview}
                 </button>
@@ -416,8 +422,8 @@ export const ProductDetailModal: React.FC = () => {
 
           {/* Related Products */}
           {relatedProducts.length > 0 && (
-            <div className="pt-6 border-t border-slate-200 space-y-4">
-              <h2 className="text-base font-bold text-slate-900">{t.product.relatedProducts}</h2>
+            <div className="pt-6 border-t border-slate-200 dark:border-slate-800 space-y-4">
+              <h2 className="text-base font-bold text-slate-900 dark:text-white">{t.product.relatedProducts}</h2>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 {relatedProducts.map(rel => (
                   <div 
@@ -426,16 +432,16 @@ export const ProductDetailModal: React.FC = () => {
                       setSelectedProductId(rel.id);
                       setActiveImageIndex(0);
                     }}
-                    className="p-3 rounded-xl border border-[#E8E4DD] hover:border-[#FF6B00] bg-[#FAF8F5] cursor-pointer transition-all flex items-center gap-3"
+                    className="p-3 rounded-xl border border-[#E8E4DD] dark:border-slate-700 hover:border-[#FF6B00] bg-[#FAF8F5] dark:bg-[#1E293B] cursor-pointer transition-all flex items-center gap-3"
                   >
                     <img 
                       src={rel.images[0]} 
                       alt={rel.name[language]} 
                       referrerPolicy="no-referrer"
-                      className="w-14 h-14 rounded-lg object-cover" 
+                      className="w-14 h-14 rounded-lg object-cover bg-white dark:bg-slate-800 shrink-0" 
                     />
                     <div className="overflow-hidden">
-                      <p className="text-xs font-bold text-slate-900 truncate">{rel.name[language]}</p>
+                      <p className="text-xs font-bold text-slate-900 dark:text-white truncate">{rel.name[language]}</p>
                       <p className="text-xs font-black text-[#FF6B00] tabular-nums">{rel.price.toFixed(3)} {t.cart.currency}</p>
                     </div>
                   </div>

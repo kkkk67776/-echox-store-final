@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Home, LayoutGrid, Search, ShoppingBag, X, ChevronLeft, ArrowRight, Sparkles, TrendingUp, Star } from 'lucide-react';
 import { useStore } from '../context/StoreContext';
 import { Product } from '../types';
@@ -29,34 +29,48 @@ export const BottomNavigation: React.FC<BottomNavigationProps> = ({ onOpenVault 
   const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
   const [localSearchInput, setLocalSearchInput] = useState('');
   const [searchResults, setSearchResults] = useState<Product[]>([]);
+  const accessCheckTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (accessCheckTimerRef.current) clearTimeout(accessCheckTimerRef.current);
+    };
+  }, []);
 
   const totalCartItems = cart.reduce((sum, item) => sum + item.quantity, 0);
 
-  const handleSearchChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const runAccessCodeVerification = async (candidate: string) => {
+    const clean = candidate.trim();
+    if (clean.length < 4 || (!clean.startsWith('#') && clean.length < 8)) return;
+    try {
+      const check = await verifyAccessCodeServer(clean);
+      if (check.success) {
+        setLocalSearchInput('');
+        setSearchQuery('');
+        setSearchResults([]);
+        setIsSearchModalOpen(false);
+        if (onOpenVault) onOpenVault();
+        window.dispatchEvent(new CustomEvent('open_echox_vault'));
+      }
+    } catch (err) {
+      console.warn('Access code check notice in bottom nav:', err);
+    }
+  };
+
+  const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
     setLocalSearchInput(val);
     setSearchQuery(val);
 
-    if (val.trim().length > 0) {
-      // التحقق الخادمي الآمن من رمز الوصول لمركز التحكم عبر Argon2id
-      if (val.trim().length >= 4 && (val.trim().startsWith('#') || val.trim().length >= 6)) {
-        try {
-          const check = await verifyAccessCodeServer(val.trim());
-          if (check.success) {
-            setLocalSearchInput('');
-            setSearchQuery('');
-            setSearchResults([]);
-            setIsSearchModalOpen(false);
+    if (accessCheckTimerRef.current) clearTimeout(accessCheckTimerRef.current);
 
-            if (onOpenVault) {
-              onOpenVault();
-            }
-            window.dispatchEvent(new CustomEvent('open_echox_vault'));
-            return;
-          }
-        } catch (err) {
-          console.warn('Access code check notice in bottom nav:', err);
-        }
+    if (val.trim().length > 0) {
+      // تحقق مؤجل (Debounce) بعد التوقف عن الكتابة بـ 500ms لمنع قفل البوابة أثناء الكتابة الحرفية
+      const trimmed = val.trim();
+      if (trimmed.startsWith('#') || trimmed.length >= 8) {
+        accessCheckTimerRef.current = setTimeout(() => {
+          runAccessCodeVerification(trimmed);
+        }, 500);
       }
 
       // البحث عن المنتجات
@@ -187,6 +201,12 @@ export const BottomNavigation: React.FC<BottomNavigationProps> = ({ onOpenVault 
                 type="text"
                 value={localSearchInput}
                 onChange={handleSearchChange}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    if (accessCheckTimerRef.current) clearTimeout(accessCheckTimerRef.current);
+                    runAccessCodeVerification(localSearchInput);
+                  }
+                }}
                 autoFocus
                 placeholder={t.bottomNav?.searchPlaceholder || 'ابحث في المعدات والأجهزة وقطع الغيار...'}
                 className="w-full bg-transparent text-xs sm:text-sm text-[#0F172A] dark:text-white placeholder-slate-400 dark:placeholder-slate-500 outline-none"

@@ -1,8 +1,7 @@
 import React, { useState } from 'react';
-import { Menu, X, Search, ShoppingBag, Heart, Phone, Bell, CheckCircle2, Sparkles, Sun, Moon, HeartHandshake } from 'lucide-react';
+import { Menu, X, ShoppingBag, Bell, CheckCircle2, Sparkles, Sun, Moon, HeartHandshake } from 'lucide-react';
 import { useStore } from '../context/StoreContext';
 import { Product } from '../types';
-import { verifyAccessCodeServer } from '../lib/security';
 
 interface HeaderProps {
   onOpenVault?: () => void;
@@ -10,7 +9,7 @@ interface HeaderProps {
   onSelectProduct?: (product: Product) => void;
 }
 
-export default function Header({ onOpenVault, productsList, onSelectProduct }: HeaderProps) {
+export default function Header(_props: HeaderProps) {
   const { 
     language, 
     setLanguage, 
@@ -20,13 +19,9 @@ export default function Header({ onOpenVault, productsList, onSelectProduct }: H
     cart, 
     setIsCartOpen, 
     wishlist, 
-    products: storeProducts,
-    setSelectedProductId,
     siteSettings,
     selectedCategory,
     setSelectedCategory,
-    searchQuery,
-    setSearchQuery,
     isDarkMode,
     toggleDarkMode,
     categories,
@@ -35,74 +30,8 @@ export default function Header({ onOpenVault, productsList, onSelectProduct }: H
 
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
-  const [searchResults, setSearchResults] = useState<Product[]>([]);
-  const [isSearchFocused, setIsSearchFocused] = useState(false);
 
-  const productsToSearch = productsList || storeProducts || [];
   const totalCartItems = cart.reduce((sum, item) => sum + item.quantity, 0);
-
-  const handleSearchChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = e.target.value;
-    setSearchQuery(val);
-
-    if (val.trim().length > 0) {
-      // التحقق الخادمي الآمن من رمز الوصول لمركز التحكم عبر Argon2id
-      if (val.trim().length >= 4 && (val.trim().startsWith('#') || val.trim().length >= 6)) {
-        try {
-          const check = await verifyAccessCodeServer(val.trim());
-          if (check.success) {
-            setSearchQuery('');
-            setSearchResults([]);
-            setIsSearchFocused(false);
-
-            if (onOpenVault) {
-              onOpenVault();
-            }
-            window.dispatchEvent(new CustomEvent('open_echox_vault'));
-            return;
-          }
-        } catch (err) {
-          console.warn('Access code check notice:', err);
-        }
-      }
-
-      // البحث عن المنتجات
-      const term = val.toLowerCase().trim();
-      const filtered = productsToSearch.filter(item => {
-        const nameAr = item.name?.ar?.toLowerCase() || '';
-        const nameFr = item.name?.fr?.toLowerCase() || '';
-        const nameEn = item.name?.en?.toLowerCase() || '';
-        const descAr = item.description?.ar?.toLowerCase() || '';
-        const descFr = item.description?.fr?.toLowerCase() || '';
-        const descEn = item.description?.en?.toLowerCase() || '';
-        const flatName = typeof (item as any).name === 'string' ? (item as any).name.toLowerCase() : '';
-        const flatDesc = typeof (item as any).description === 'string' ? (item as any).description.toLowerCase() : '';
-
-        return (
-          nameAr.includes(term) ||
-          nameFr.includes(term) ||
-          nameEn.includes(term) ||
-          descAr.includes(term) ||
-          descFr.includes(term) ||
-          descEn.includes(term) ||
-          flatName.includes(term) ||
-          flatDesc.includes(term)
-        );
-      });
-      setSearchResults(filtered);
-    } else {
-      setSearchResults([]);
-    }
-  };
-
-  const handleSelectProductItem = (product: Product) => {
-    if (onSelectProduct) {
-      onSelectProduct(product);
-    } else if (setSelectedProductId) {
-      setSelectedProductId(product.id);
-    }
-    setIsSearchFocused(false);
-  };
 
   const handleNavClick = (view: string) => {
     setCurrentView(view);

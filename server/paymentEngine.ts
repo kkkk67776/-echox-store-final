@@ -1,6 +1,12 @@
 import crypto from 'crypto';
 import fs from 'fs';
-import path from 'path';
+import {
+  atomicWriteJsonSync,
+  getDataFilePath,
+  isCloudPersistenceEnabled,
+  loadCloudJson,
+  pushCloudJson,
+} from './cloudPersistence';
 import type {
   Order,
   OrderItem,
@@ -17,7 +23,8 @@ import type {
   TransferProof,
 } from '../src/types/index';
 
-const PAYMENT_DATA_FILE = path.resolve(process.cwd(), 'payment_system_data.json');
+const PAYMENT_DATA_FILE = getDataFilePath('payment_system_data.json');
+const CLOUD_PAYMENT_KEY = 'echox:payment_system_data';
 
 interface ServerSecretsConfig {
   apiKey: string;
@@ -27,6 +34,7 @@ interface ServerSecretsConfig {
 
 interface InternalPaymentConfig extends PaymentSystemPublicConfig {
   secrets: ServerSecretsConfig;
+  bankIntegritySeal?: string;
   shipping: {
     standardShippingFee: number;
     freeShippingThreshold: number;
@@ -124,6 +132,7 @@ function createInitialDb(): PaymentSystemDatabase {
         walletId: process.env.KONNECT_WALLET_ID || '',
         webhookSecret: process.env.PAYMENT_WEBHOOK_SECRET || '',
       },
+      bankIntegritySeal: '',
       updatedAt: now,
     },
     catalog: { ...DEFAULT_CATALOG },
@@ -145,51 +154,54 @@ function createInitialDb(): PaymentSystemDatabase {
   };
 }
 
+function mergeDatabaseSnapshot(raw: Partial<PaymentSystemDatabase>): PaymentSystemDatabase {
+  const def = createInitialDb();
+  return {
+    ...def,
+    ...raw,
+    config: {
+      ...def.config,
+      ...(raw.config || {}),
+      shipping: {
+        ...def.config.shipping,
+        ...(raw.config?.shipping || {}),
+      },
+      methods: {
+        cod: { ...def.config.methods.cod, ...(raw.config?.methods?.cod || {}) },
+        bank_transfer: {
+          ...def.config.methods.bank_transfer,
+          ...(raw.config?.methods?.bank_transfer || {}),
+          instructions: {
+            ...def.config.methods.bank_transfer.instructions,
+            ...(raw.config?.methods?.bank_transfer?.instructions || {}),
+          },
+        },
+        online_payment: {
+          ...def.config.methods.online_payment,
+          ...(raw.config?.methods?.online_payment || {}),
+        },
+      },
+      secrets: {
+        ...def.config.secrets,
+        ...(raw.config?.secrets || {}),
+      },
+    },
+    catalog: { ...DEFAULT_CATALOG, ...(raw.catalog || {}) },
+    orders: Array.isArray(raw.orders) ? raw.orders : [],
+    transactions: Array.isArray(raw.transactions) ? raw.transactions : [],
+    vendorLedgers: Array.isArray(raw.vendorLedgers) ? raw.vendorLedgers : [],
+    refundRequests: Array.isArray(raw.refundRequests) ? raw.refundRequests : [],
+    supportTransactions: Array.isArray(raw.supportTransactions) ? raw.supportTransactions : [],
+    activityLogs: Array.isArray(raw.activityLogs) ? raw.activityLogs : def.activityLogs,
+    processedWebhookKeys: Array.isArray(raw.processedWebhookKeys) ? raw.processedWebhookKeys : [],
+  };
+}
+
 function loadDatabase(): PaymentSystemDatabase {
   try {
     if (fs.existsSync(PAYMENT_DATA_FILE)) {
       const raw = JSON.parse(fs.readFileSync(PAYMENT_DATA_FILE, 'utf-8'));
-      const def = createInitialDb();
-      const merged: PaymentSystemDatabase = {
-        ...def,
-        ...raw,
-        config: {
-          ...def.config,
-          ...(raw.config || {}),
-          shipping: {
-            ...def.config.shipping,
-            ...(raw.config?.shipping || {}),
-          },
-          methods: {
-            cod: { ...def.config.methods.cod, ...(raw.config?.methods?.cod || {}) },
-            bank_transfer: {
-              ...def.config.methods.bank_transfer,
-              ...(raw.config?.methods?.bank_transfer || {}),
-              instructions: {
-                ...def.config.methods.bank_transfer.instructions,
-                ...(raw.config?.methods?.bank_transfer?.instructions || {}),
-              },
-            },
-            online_payment: {
-              ...def.config.methods.online_payment,
-              ...(raw.config?.methods?.online_payment || {}),
-            },
-          },
-          secrets: {
-            ...def.config.secrets,
-            ...(raw.config?.secrets || {}),
-          },
-        },
-        catalog: { ...DEFAULT_CATALOG, ...(raw.catalog || {}) },
-        orders: Array.isArray(raw.orders) ? raw.orders : [],
-        transactions: Array.isArray(raw.transactions) ? raw.transactions : [],
-        vendorLedgers: Array.isArray(raw.vendorLedgers) ? raw.vendorLedgers : [],
-        refundRequests: Array.isArray(raw.refundRequests) ? raw.refundRequests : [],
-        supportTransactions: Array.isArray(raw.supportTransactions) ? raw.supportTransactions : [],
-        activityLogs: Array.isArray(raw.activityLogs) ? raw.activityLogs : def.activityLogs,
-        processedWebhookKeys: Array.isArray(raw.processedWebhookKeys) ? raw.processedWebhookKeys : [],
-      };
-      return merged;
+      return mergeDatabaseSnapshot(raw);
     }
   } catch (err) {
     console.warn('[PaymentEngine] Notice loading payment DB, initializing fresh file:', err);
@@ -201,13 +213,163 @@ function loadDatabase(): PaymentSystemDatabase {
 
 function saveDatabase(db: PaymentSystemDatabase): void {
   try {
-    fs.writeFileSync(PAYMENT_DATA_FILE, JSON.stringify(db, null, 2));
+    atomicWriteJsonSync(PAYMENT_DATA_FILE, db);
   } catch (err) {
     console.error('[PaymentEngine] Error persisting payment DB:', err);
   }
+  pushCloudJson(CLOUD_PAYMENT_KEY, db);
 }
 
 let paymentDb: PaymentSystemDatabase = loadDatabase();
+
+function getBankIntegritySecret(): string {
+  const fromEnv = (process.env.ECHOX_SECURITY_HMAC_SECRET || '').trim();
+  if (fromEnv.length >= 16) return fromEnv;
+  const secretFile = getDataFilePath('.hmac_secret');
+  try {
+    if (fs.existsSync(secretFile)) {
+      const stored = fs.readFileSync(secretFile, 'utf-8').trim();
+      if (stored.length >= 16) return stored;
+    }
+  } catch {}
+  return 'echox-bank-local-seal-v1';
+}
+
+function getCanonicalBankFields(bank: {
+  accountHolder?: string;
+  bankName?: string;
+  ibanOrRib?: string;
+  swiftCode?: string;
+}): string {
+  return [
+    (bank.accountHolder || '').trim(),
+    (bank.bankName || '').trim(),
+    (bank.ibanOrRib || '').trim(),
+    (bank.swiftCode || '').trim(),
+  ].join('|');
+}
+
+function computeBankSeal(bank: {
+  accountHolder?: string;
+  bankName?: string;
+  ibanOrRib?: string;
+  swiftCode?: string;
+}): string {
+  return crypto
+    .createHmac('sha256', getBankIntegritySecret())
+    .update(`bank:${getCanonicalBankFields(bank)}`)
+    .digest('hex');
+}
+
+function computeIbanFingerprint(ibanOrRib: string): string {
+  const clean = (ibanOrRib || '').replace(/\s+/g, '').toUpperCase();
+  if (!clean) return 'NONE';
+  const digest = crypto.createHash('sha256').update(clean).digest('hex').slice(0, 8).toUpperCase();
+  return `${digest.slice(0, 4)}-${digest.slice(4, 8)}`;
+}
+
+function ensureInitialBankSeal(): void {
+  if (!paymentDb.config.bankIntegritySeal) {
+    paymentDb.config.bankIntegritySeal = computeBankSeal(paymentDb.config.methods.bank_transfer);
+    saveDatabase(paymentDb);
+  }
+}
+
+ensureInitialBankSeal();
+
+export async function hydratePaymentDbFromCloud(): Promise<void> {
+  if (!isCloudPersistenceEnabled()) return;
+  const remote = await loadCloudJson<Partial<PaymentSystemDatabase>>(CLOUD_PAYMENT_KEY);
+  if (remote && typeof remote === 'object') {
+    paymentDb = mergeDatabaseSnapshot(remote);
+    if (!paymentDb.config.bankIntegritySeal) {
+      paymentDb.config.bankIntegritySeal = computeBankSeal(paymentDb.config.methods.bank_transfer);
+    }
+    try {
+      atomicWriteJsonSync(PAYMENT_DATA_FILE, paymentDb);
+    } catch (err) {
+      console.warn('[PaymentEngine] Notice syncing cloud snapshot to local file:', err);
+    }
+  } else {
+    pushCloudJson(CLOUD_PAYMENT_KEY, paymentDb);
+  }
+}
+
+export function isEnvLockedBank(): boolean {
+  return Boolean((process.env.LOCKED_BANK_IBAN || '').trim().length >= 8);
+}
+
+export function getVerifiedBankTransferPublic(): PaymentSystemPublicConfig['methods']['bank_transfer'] {
+  const cfg = paymentDb.config;
+  const rawBank = cfg.methods.bank_transfer;
+
+  // Layer 1: Immutable Environment Variable Override
+  const envIban = (process.env.LOCKED_BANK_IBAN || '').trim();
+  if (envIban.length >= 8) {
+    const accountHolder = (process.env.LOCKED_BANK_HOLDER || rawBank.accountHolder || '').trim();
+    const bankName = (process.env.LOCKED_BANK_NAME || rawBank.bankName || '').trim();
+    const swiftCode = (process.env.LOCKED_BANK_SWIFT || rawBank.swiftCode || '').trim();
+    return {
+      ...rawBank,
+      accountHolder,
+      bankName,
+      ibanOrRib: envIban,
+      swiftCode,
+      integrityVerified: true,
+      lockedByEnv: true,
+      tamperDetected: false,
+      ibanFingerprint: computeIbanFingerprint(envIban),
+    };
+  }
+
+  // Layer 2: HMAC-SHA256 Seal Verification against disk/DB tampering
+  const expectedSeal = computeBankSeal(rawBank);
+  const storedSeal = (cfg.bankIntegritySeal || '').trim();
+  const sealValid =
+    storedSeal.length === expectedSeal.length &&
+    crypto.timingSafeEqual(Buffer.from(storedSeal), Buffer.from(expectedSeal));
+
+  if (!sealValid) {
+    return {
+      ...rawBank,
+      enabled: false,
+      ibanOrRib: '⚠️ تم تعليق التحويل البنكي تلقائياً لاكتشاف تعديل غير مصرّح به',
+      integrityVerified: false,
+      lockedByEnv: false,
+      tamperDetected: true,
+      ibanFingerprint: 'TAMPERED',
+    };
+  }
+
+  return {
+    ...rawBank,
+    integrityVerified: true,
+    lockedByEnv: false,
+    tamperDetected: false,
+    ibanFingerprint: computeIbanFingerprint(rawBank.ibanOrRib),
+  };
+}
+
+export function isBankIdentityChange(incoming?: Partial<InternalPaymentConfig['methods']['bank_transfer']>): boolean {
+  if (!incoming) return false;
+  const current = paymentDb.config.methods.bank_transfer;
+  const check = (nextVal: string | undefined, curVal: string | undefined) =>
+    typeof nextVal === 'string' && nextVal.trim() !== (curVal || '').trim();
+  return (
+    check(incoming.ibanOrRib, current.ibanOrRib) ||
+    check(incoming.accountHolder, current.accountHolder) ||
+    check(incoming.bankName, current.bankName) ||
+    check(incoming.swiftCode, current.swiftCode) ||
+    (incoming.enabled === true && getVerifiedBankTransferPublic().tamperDetected === true)
+  );
+}
+
+export function getActiveCatalogProductIds(): string[] {
+  const activeIds = Object.values(paymentDb.catalog || {})
+    .filter((item) => item && item.id && item.active !== false)
+    .map((item) => String(item.id));
+  return Array.from(new Set([...Object.keys(DEFAULT_CATALOG), ...activeIds]));
+}
 
 function appendActivity(
   action: string,
@@ -256,9 +418,7 @@ export function getPublicPaymentConfig(): PaymentSystemPublicConfig {
     taxRatePercent: cfg.taxRatePercent,
     methods: {
       cod: { enabled: !!cfg.methods.cod.enabled },
-      bank_transfer: {
-        ...cfg.methods.bank_transfer,
-      },
+      bank_transfer: getVerifiedBankTransferPublic(),
       online_payment: {
         enabled: !!cfg.methods.online_payment.enabled && ready,
         provider: cfg.methods.online_payment.provider || 'konnect',
@@ -335,6 +495,15 @@ export function updateAdminPaymentConfig(payload: {
     cfg.methods.cod.enabled = payload.codEnabled;
   }
   if (payload.bankTransfer) {
+    const identityChanged = isBankIdentityChange(payload.bankTransfer);
+    if (identityChanged && isEnvLockedBank()) {
+      return {
+        ok: false,
+        error: 'الحساب البنكي مقفول من متغيرات البيئة (LOCKED_BANK_IBAN) لحمايته من الاختراق ولا يمكن تغييره من اللوحة.',
+      };
+    }
+
+    const prevIbanMask = maskSecret(cfg.methods.bank_transfer.ibanOrRib) || 'NONE';
     cfg.methods.bank_transfer = {
       ...cfg.methods.bank_transfer,
       ...payload.bankTransfer,
@@ -343,6 +512,16 @@ export function updateAdminPaymentConfig(payload: {
         ...(payload.bankTransfer.instructions || {}),
       },
     };
+    cfg.bankIntegritySeal = computeBankSeal(cfg.methods.bank_transfer);
+
+    if (identityChanged) {
+      const nextIbanMask = maskSecret(cfg.methods.bank_transfer.ibanOrRib) || 'NONE';
+      appendActivity(
+        'BANK_ACCOUNT_MODIFIED',
+        'admin',
+        `PIN-verified bank account update (${prevIbanMask} -> ${nextIbanMask}, fingerprint: ${computeIbanFingerprint(cfg.methods.bank_transfer.ibanOrRib)}).`
+      );
+    }
   }
   if (payload.onlinePayment) {
     if (payload.onlinePayment.provider) {
@@ -471,8 +650,20 @@ export async function processServerCheckout(input: ServerCheckoutInput): Promise
   if (normalizedMethod === 'cod' && !cfg.methods.cod.enabled) {
     return { ok: false, statusCode: 400, error: 'وسيلة الدفع عند الاستلام معطلة حالياً من مركز التحكم.' };
   }
-  if (normalizedMethod === 'bank_transfer' && !cfg.methods.bank_transfer.enabled) {
-    return { ok: false, statusCode: 400, error: 'وسيلة التحويل البنكي معطلة حالياً من مركز التحكم.' };
+  if (normalizedMethod === 'bank_transfer') {
+    const bankPublic = getVerifiedBankTransferPublic();
+    if (bankPublic.tamperDetected) {
+      appendActivity('BANK_INTEGRITY_TAMPER_BLOCKED', 'system', 'Blocked bank transfer checkout due to failed HMAC integrity seal on bank account settings.');
+      saveDatabase(paymentDb);
+      return {
+        ok: false,
+        statusCode: 403,
+        error: 'تم تعليق التحويل البنكي مؤقتاً لعدم تطابق ختم الأمان الخاص بالحساب البنكي. يرجى التواصل مع الإدارة.',
+      };
+    }
+    if (!bankPublic.enabled) {
+      return { ok: false, statusCode: 400, error: 'وسيلة التحويل البنكي معطلة حالياً من مركز التحكم.' };
+    }
   }
   if (normalizedMethod === 'online_payment') {
     if (!cfg.methods.online_payment.enabled || !isOnlineGatewayReady()) {
@@ -1350,8 +1541,11 @@ export function createSupportContribution(payload: {
   if (method === 'cod' && !cfg.methods.cod.enabled) {
     return { ok: false, statusCode: 400, error: 'الدفع النقدي غير مفعّل حالياً.' };
   }
-  if (method === 'bank_transfer' && !cfg.methods.bank_transfer.enabled) {
-    return { ok: false, statusCode: 400, error: 'التحويل البنكي غير مفعّل حالياً.' };
+  if (method === 'bank_transfer') {
+    const bankPublic = getVerifiedBankTransferPublic();
+    if (bankPublic.tamperDetected || !bankPublic.enabled) {
+      return { ok: false, statusCode: 400, error: 'التحويل البنكي غير متاح حالياً.' };
+    }
   }
   if (method === 'online_payment' && (!cfg.methods.online_payment.enabled || !isOnlineGatewayReady())) {
     return { ok: false, statusCode: 400, error: 'الدفع الإلكتروني غير مفعّل بعد في مركز التحكم.' };

@@ -32,7 +32,7 @@ export const Footer: React.FC = () => {
                 <span className="text-lg font-black tracking-tight text-white block leading-none">
                   ECHOX <span className="text-[#FF6B00]">Store</span>
                 </span>
-                <span className="text-[10px] text-slate-400 font-bold">المنصة التونسية المعتمدة</span>
+                <span className="text-[10px] text-slate-400 font-bold">{t.footer.verifiedBadge}</span>
               </div>
             </div>
 
@@ -150,7 +150,7 @@ export const Footer: React.FC = () => {
           {/* 4. معلومات التواصل الرسمية */}
           <div className="space-y-2.5">
             <h4 className="text-xs font-black text-[#FF6B00] uppercase tracking-wider">
-              التواصل المباشر
+              {t.footer.directContact}
             </h4>
             <ul className="space-y-2 text-xs text-slate-300 font-medium">
               {siteSettings?.supportPhone && (
@@ -163,14 +163,21 @@ export const Footer: React.FC = () => {
               )}
               {siteSettings?.whatsappPhone && (
                 <li className="flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-[#25D366] animate-pulse"></span>
                   <a 
                     href={`https://wa.me/${siteSettings.whatsappPhone.replace(/\D/g, '')}?text=مرحباً%20ECHOX%20Store%20تونس`}
                     target="_blank"
                     rel="noreferrer"
-                    className="text-[#25D366] hover:underline flex items-center gap-1 font-bold"
+                    aria-label="WhatsApp"
+                    title="WhatsApp"
+                    className="text-[#25D366] hover:underline flex items-center gap-2 font-mono font-bold transition-opacity hover:opacity-90"
                   >
-                    <span>واتساب:</span>
+                    <svg
+                      viewBox="0 0 32 32"
+                      className="w-4 h-4 shrink-0 fill-[#25D366]"
+                      aria-hidden="true"
+                    >
+                      <path d="M16.004 2.667C8.64 2.667 2.667 8.64 2.667 16c0 2.352.616 4.648 1.787 6.672L2.667 29.333l6.832-1.792A13.28 13.28 0 0 0 16.004 29.333C23.368 29.333 29.333 23.36 29.333 16S23.368 2.667 16.004 2.667zm7.768 18.88c-.325.917-1.912 1.749-2.648 1.856-.672.101-1.525.144-2.464-.155-.568-.181-1.296-.421-2.224-.821-3.912-1.688-6.464-5.637-6.659-5.899-.195-.261-1.589-2.115-1.589-4.035 0-1.92 1.005-2.864 1.363-3.253.357-.389.779-.485 1.037-.485.261 0 .52.003.747.013.24.011.563-.091.88.672.325.784 1.107 2.704 1.203 2.901.096.197.16.427.032.688-.128.261-.192.427-.389.656-.197.229-.413.512-.589.688-.197.197-.403.411-.173.805.229.395 1.021 1.685 2.192 2.731 1.507 1.344 2.779 1.76 3.173 1.957.395.197.624.165.853-.099.229-.261.989-1.155 1.253-1.552.261-.395.523-.328.88-.197.357.131 2.277 1.075 2.667 1.269.389.197.651.293.747.456.096.165.096.949-.229 1.867z" />
+                    </svg>
                     <span dir="ltr">+{siteSettings.whatsappPhone.replace(/\D/g, '')}</span>
                   </a>
                 </li>

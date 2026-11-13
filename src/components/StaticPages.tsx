@@ -27,66 +27,66 @@ export const PromiseView: React.FC = () => {
   const { language, t, siteSettings, setCurrentView } = useStore();
 
   return (
-    <div className="max-w-4xl mx-auto px-4 sm:px-6 py-12 space-y-12 animate-fadeIn">
+    <div className="max-w-4xl mx-auto px-4 sm:px-6 py-12 space-y-12 animate-fadeIn text-slate-900 dark:text-slate-100">
       <div className="text-center space-y-4">
         <span className="text-xs font-black uppercase tracking-widest text-[#FF6B00] bg-[#FF6B00]/10 px-3.5 py-1.5 rounded-full">
-          ميثاق الشرف والجودة
+          {t.staticExtras.promiseBadge}
         </span>
-        <h1 className="text-3xl sm:text-4xl font-black text-slate-900">
+        <h1 className="text-3xl sm:text-4xl font-black text-slate-900 dark:text-white">
           {t.promisePage.title}
         </h1>
-        <p className="text-base text-slate-600 max-w-2xl mx-auto leading-relaxed">
+        <p className="text-base text-slate-600 dark:text-slate-400 max-w-2xl mx-auto leading-relaxed">
           {t.promisePage.subtitle}
         </p>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div className="bg-white p-6 rounded-3xl border border-[#E8E4DD] shadow-xs space-y-3">
-          <div className="w-12 h-12 rounded-2xl bg-amber-500/10 text-amber-600 flex items-center justify-center">
+        <div className="bg-white dark:bg-[#0F172A] p-6 rounded-3xl border border-[#E8E4DD] dark:border-slate-800 shadow-xs space-y-3">
+          <div className="w-12 h-12 rounded-2xl bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center">
             <Award className="w-6 h-6" />
           </div>
-          <h3 className="text-lg font-bold text-slate-900">{t.promisePage.point1Title}</h3>
-          <p className="text-sm text-slate-600 leading-relaxed">{t.promisePage.point1Desc}</p>
+          <h3 className="text-lg font-bold text-slate-900 dark:text-white">{t.promisePage.point1Title}</h3>
+          <p className="text-sm text-slate-600 dark:text-slate-400 leading-relaxed">{t.promisePage.point1Desc}</p>
         </div>
 
-        <div className="bg-white p-6 rounded-3xl border border-[#E8E4DD] shadow-xs space-y-3">
-          <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 text-emerald-600 flex items-center justify-center">
+        <div className="bg-white dark:bg-[#0F172A] p-6 rounded-3xl border border-[#E8E4DD] dark:border-slate-800 shadow-xs space-y-3">
+          <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
             <ShieldCheck className="w-6 h-6" />
           </div>
-          <h3 className="text-lg font-bold text-slate-900">{t.promisePage.point2Title}</h3>
-          <p className="text-sm text-slate-600 leading-relaxed">{t.promisePage.point2Desc}</p>
+          <h3 className="text-lg font-bold text-slate-900 dark:text-white">{t.promisePage.point2Title}</h3>
+          <p className="text-sm text-slate-600 dark:text-slate-400 leading-relaxed">{t.promisePage.point2Desc}</p>
         </div>
 
-        <div className="bg-white p-6 rounded-3xl border border-[#E8E4DD] shadow-xs space-y-3">
-          <div className="w-12 h-12 rounded-2xl bg-blue-500/10 text-blue-600 flex items-center justify-center">
+        <div className="bg-white dark:bg-[#0F172A] p-6 rounded-3xl border border-[#E8E4DD] dark:border-slate-800 shadow-xs space-y-3">
+          <div className="w-12 h-12 rounded-2xl bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center">
             <RefreshCw className="w-6 h-6" />
           </div>
-          <h3 className="text-lg font-bold text-slate-900">{t.promisePage.point3Title}</h3>
-          <p className="text-sm text-slate-600 leading-relaxed">{t.promisePage.point3Desc}</p>
+          <h3 className="text-lg font-bold text-slate-900 dark:text-white">{t.promisePage.point3Title}</h3>
+          <p className="text-sm text-slate-600 dark:text-slate-400 leading-relaxed">{t.promisePage.point3Desc}</p>
         </div>
 
-        <div className="bg-white p-6 rounded-3xl border border-[#E8E4DD] shadow-xs space-y-3">
-          <div className="w-12 h-12 rounded-2xl bg-purple-500/10 text-purple-600 flex items-center justify-center">
+        <div className="bg-white dark:bg-[#0F172A] p-6 rounded-3xl border border-[#E8E4DD] dark:border-slate-800 shadow-xs space-y-3">
+          <div className="w-12 h-12 rounded-2xl bg-purple-500/10 text-purple-600 dark:text-purple-400 flex items-center justify-center">
             <Headphones className="w-6 h-6" />
           </div>
-          <h3 className="text-lg font-bold text-slate-900">{t.promisePage.point4Title}</h3>
-          <p className="text-sm text-slate-600 leading-relaxed">{t.promisePage.point4Desc}</p>
+          <h3 className="text-lg font-bold text-slate-900 dark:text-white">{t.promisePage.point4Title}</h3>
+          <p className="text-sm text-slate-600 dark:text-slate-400 leading-relaxed">{t.promisePage.point4Desc}</p>
         </div>
       </div>
 
-      <div className="bg-[#0B0F17] rounded-3xl p-8 text-center text-white space-y-4">
-        <h2 className="text-xl sm:text-2xl font-black">جاهز لتجربة تسوق مختلفة في تونس؟</h2>
+      <div className="bg-[#0B0F17] dark:bg-[#1E293B] border border-slate-800 rounded-3xl p-8 text-center text-white space-y-4">
+        <h2 className="text-xl sm:text-2xl font-black">{t.staticExtras.promiseCtaTitle}</h2>
         <p className="text-xs sm:text-sm text-slate-400 max-w-lg mx-auto">
-          اختر قطعتك الآن، واستلمها خلال 24-48 ساعة، وادفع عند المعاينة لباب منزلك أو ورشتك.
+          {t.staticExtras.promiseCtaDesc}
         </p>
         <button
           onClick={() => {
             setCurrentView('store');
             window.scrollTo({ top: 0, behavior: 'smooth' });
           }}
-          className="px-6 py-3 bg-[#FF6B00] hover:bg-[#e05e00] text-white font-bold text-xs rounded-xl shadow-md transition-all"
+          className="px-6 py-3 bg-[#FF6B00] hover:bg-[#e05e00] text-white font-bold text-xs rounded-xl shadow-md transition-all cursor-pointer"
         >
-          تصفح المتجر الآن
+          {t.staticExtras.promiseCtaBtn}
         </button>
       </div>
     </div>
@@ -189,7 +189,7 @@ export const CompaniesView: React.FC = () => {
               {compProducts.length > 0 && (
                 <div className="space-y-3 pt-2">
                   <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">
-                    منتجات متوفرة من {comp.name}:
+                    {t.staticExtras.companyProductsPrefix} {comp.name}:
                   </h3>
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                     {compProducts.map(p => (
@@ -343,7 +343,7 @@ export const CompaniesView: React.FC = () => {
 
 // 3. Contact Us Page (اتصل بنا)
 export const ContactView: React.FC = () => {
-  const { siteSettings, sendInquiry, t } = useStore();
+  const { siteSettings, sendInquiry, language, t } = useStore();
   const [senderName, setSenderName] = useState('');
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
@@ -373,12 +373,12 @@ export const ContactView: React.FC = () => {
   };
 
   return (
-    <div className="max-w-4xl mx-auto px-4 sm:px-6 py-12 space-y-8 animate-fadeIn">
+    <div className="max-w-4xl mx-auto px-4 sm:px-6 py-12 space-y-8 animate-fadeIn text-slate-900 dark:text-slate-100">
       <div className="text-center space-y-3">
-        <h1 className="text-2xl sm:text-3xl font-black text-slate-900">
+        <h1 className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white">
           {t.contactModal.title}
         </h1>
-        <p className="text-sm text-slate-600 max-w-lg mx-auto">
+        <p className="text-sm text-slate-600 dark:text-slate-400 max-w-lg mx-auto">
           {t.contactModal.subtitle}
         </p>
       </div>
@@ -386,55 +386,64 @@ export const ContactView: React.FC = () => {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         
         {/* Quick Contacts Box */}
-        <div className="md:col-span-1 bg-white p-6 rounded-3xl border border-[#E8E4DD] shadow-xs space-y-6">
+        <div className="md:col-span-1 bg-white dark:bg-[#0F172A] p-6 rounded-3xl border border-[#E8E4DD] dark:border-slate-800 shadow-xs space-y-6">
           <div>
-            <h3 className="text-sm font-bold text-slate-900 mb-3">قنوات التواصل المباشرة</h3>
+            <h3 className="text-sm font-bold text-slate-900 dark:text-white mb-3">{t.staticExtras.contactChannelsTitle}</h3>
             <div className="space-y-4 text-xs">
               <a
                 href={`tel:${siteSettings.supportPhone}`}
-                className="p-3 rounded-2xl bg-slate-50 hover:bg-[#FF6B00]/10 flex items-center gap-3 transition-colors border border-slate-200"
+                className="p-3 rounded-2xl bg-slate-50 dark:bg-[#1E293B] hover:bg-[#FF6B00]/10 flex items-center gap-3 transition-colors border border-slate-200 dark:border-slate-700"
               >
                 <div className="w-8 h-8 rounded-full bg-[#FF6B00] text-white flex items-center justify-center shrink-0">
                   <Phone className="w-4 h-4" />
                 </div>
                 <div>
-                  <span className="text-[11px] text-slate-500 block">اتصال هاتفي</span>
-                  <span className="font-bold text-slate-900 font-mono" dir="ltr">{siteSettings.supportPhone}</span>
+                  <span className="text-[11px] text-slate-500 dark:text-slate-400 block">{t.staticExtras.phoneShortLabel}</span>
+                  <span className="font-bold text-slate-900 dark:text-white font-mono" dir="ltr">{siteSettings.supportPhone}</span>
                 </div>
               </a>
 
               <a
-                href={`https://wa.me/${siteSettings.whatsappPhone}`}
+                href={`https://wa.me/${siteSettings.whatsappPhone.replace(/\D/g, '')}`}
                 target="_blank"
                 rel="noreferrer"
-                className="p-3 rounded-2xl bg-emerald-50 hover:bg-emerald-100 flex items-center gap-3 transition-colors border border-emerald-200"
+                aria-label="WhatsApp"
+                className="p-3 rounded-2xl bg-emerald-50 dark:bg-emerald-950/30 hover:bg-emerald-100 dark:hover:bg-emerald-950/50 flex items-center gap-3 transition-colors border border-emerald-200 dark:border-emerald-800/50"
               >
-                <div className="w-8 h-8 rounded-full bg-emerald-600 text-white flex items-center justify-center shrink-0">
-                  <Phone className="w-4 h-4" />
+                <div className="w-8 h-8 rounded-full bg-[#25D366] text-white flex items-center justify-center shrink-0">
+                  <svg
+                    viewBox="0 0 32 32"
+                    className="w-4 h-4 fill-current"
+                    aria-hidden="true"
+                  >
+                    <path d="M16.004 2.667C8.64 2.667 2.667 8.64 2.667 16c0 2.352.616 4.648 1.787 6.672L2.667 29.333l6.832-1.792A13.28 13.28 0 0 0 16.004 29.333C23.368 29.333 29.333 23.36 29.333 16S23.368 2.667 16.004 2.667zm7.768 18.88c-.325.917-1.912 1.749-2.648 1.856-.672.101-1.525.144-2.464-.155-.568-.181-1.296-.421-2.224-.821-3.912-1.688-6.464-5.637-6.659-5.899-.195-.261-1.589-2.115-1.589-4.035 0-1.92 1.005-2.864 1.363-3.253.357-.389.779-.485 1.037-.485.261 0 .52.003.747.013.24.011.563-.091.88.672.325.784 1.107 2.704 1.203 2.901.096.197.16.427.032.688-.128.261-.192.427-.389.656-.197.229-.413.512-.589.688-.197.197-.403.411-.173.805.229.395 1.021 1.685 2.192 2.731 1.507 1.344 2.779 1.76 3.173 1.957.395.197.624.165.853-.099.229-.261.989-1.155 1.253-1.552.261-.395.523-.328.88-.197.357.131 2.277 1.075 2.667 1.269.389.197.651.293.747.456.096.165.096.949-.229 1.867z" />
+                  </svg>
                 </div>
                 <div>
-                  <span className="text-[11px] text-emerald-800 block">واتساب مباشر</span>
-                  <span className="font-bold text-emerald-950 font-mono" dir="ltr">+{siteSettings.whatsappPhone}</span>
+                  <span className="text-[11px] text-emerald-800 dark:text-emerald-400 block">{t.staticExtras.directContactShortLabel}</span>
+                  <span className="font-bold text-emerald-950 dark:text-emerald-300 font-mono" dir="ltr">+{siteSettings.whatsappPhone.replace(/\D/g, '')}</span>
                 </div>
               </a>
 
-              <div className="p-3 rounded-2xl bg-slate-50 flex items-center gap-3 border border-slate-200">
+              <div className="p-3 rounded-2xl bg-slate-50 dark:bg-[#1E293B] flex items-center gap-3 border border-slate-200 dark:border-slate-700">
                 <div className="w-8 h-8 rounded-full bg-slate-800 text-white flex items-center justify-center shrink-0">
                   <Mail className="w-4 h-4" />
                 </div>
-                <div>
-                  <span className="text-[11px] text-slate-500 block">البريد الرسمي</span>
-                  <span className="font-bold text-slate-900 text-[11px]" dir="ltr">{siteSettings.officialEmail}</span>
+                <div className="min-w-0">
+                  <span className="text-[11px] text-slate-500 dark:text-slate-400 block">{t.staticExtras.officialEmailLabel}</span>
+                  <span className="font-bold text-slate-900 dark:text-white text-[11px] truncate block" dir="ltr">{siteSettings.officialEmail}</span>
                 </div>
               </div>
 
-              <div className="p-3 rounded-2xl bg-slate-50 flex items-center gap-3 border border-slate-200">
+              <div className="p-3 rounded-2xl bg-slate-50 dark:bg-[#1E293B] flex items-center gap-3 border border-slate-200 dark:border-slate-700">
                 <div className="w-8 h-8 rounded-full bg-slate-800 text-white flex items-center justify-center shrink-0">
                   <MapPin className="w-4 h-4" />
                 </div>
                 <div>
-                  <span className="text-[11px] text-slate-500 block">المقر الرئيسي</span>
-                  <span className="font-bold text-slate-900 text-[11px]">{siteSettings.address}</span>
+                  <span className="text-[11px] text-slate-500 dark:text-slate-400 block">{t.staticExtras.hqLabel}</span>
+                  <span className="font-bold text-slate-900 dark:text-white text-[11px]">
+                    {(siteSettings.addressMultilingual && siteSettings.addressMultilingual[language]) || siteSettings.address}
+                  </span>
                 </div>
               </div>
             </div>
@@ -442,12 +451,12 @@ export const ContactView: React.FC = () => {
         </div>
 
         {/* Message Form */}
-        <div className="md:col-span-2 bg-white p-6 sm:p-8 rounded-3xl border border-[#E8E4DD] shadow-xs space-y-4">
-          <h2 className="text-base font-bold text-slate-900">{t.contactModal.formTitle}</h2>
+        <div className="md:col-span-2 bg-white dark:bg-[#0F172A] p-6 sm:p-8 rounded-3xl border border-[#E8E4DD] dark:border-slate-800 shadow-xs space-y-4">
+          <h2 className="text-base font-bold text-slate-900 dark:text-white">{t.contactModal.formTitle}</h2>
 
           {sentSuccess && (
-            <div className="p-4 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-2xl text-xs font-bold flex items-center gap-2">
-              <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+            <div className="p-4 bg-emerald-50 dark:bg-emerald-900/30 border border-emerald-200 dark:border-emerald-800/60 text-emerald-800 dark:text-emerald-300 rounded-2xl text-xs font-bold flex items-center gap-2">
+              <CheckCircle2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400 shrink-0" />
               <span>{t.contactModal.sentSuccess}</span>
             </div>
           )}
@@ -455,57 +464,57 @@ export const ContactView: React.FC = () => {
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">{t.checkout.fullName} *</label>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">{t.checkout.fullName} *</label>
                 <input
                   type="text"
                   required
                   value={senderName}
                   onChange={e => setSenderName(e.target.value)}
-                  placeholder="اسمك الكامل"
-                  className="w-full text-xs py-2.5 px-3 rounded-xl border border-slate-300 focus:outline-hidden focus:border-[#FF6B00]"
+                  placeholder={t.staticExtras.namePlaceholder}
+                  className="w-full text-xs py-2.5 px-3 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-[#1E293B] text-slate-900 dark:text-white focus:outline-hidden focus:border-[#FF6B00]"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">{t.checkout.phone} *</label>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">{t.checkout.phone} *</label>
                 <input
                   type="tel"
                   required
                   value={phone}
                   onChange={e => setPhone(e.target.value)}
                   placeholder="+216 21 000 000"
-                  className="w-full text-xs py-2.5 px-3 rounded-xl border border-slate-300 focus:outline-hidden focus:border-[#FF6B00]"
+                  className="w-full text-xs py-2.5 px-3 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-[#1E293B] text-slate-900 dark:text-white focus:outline-hidden focus:border-[#FF6B00]"
                   dir="ltr"
                 />
               </div>
             </div>
 
             <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">{t.contactModal.subject}</label>
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">{t.contactModal.subject}</label>
               <input
                 type="text"
                 value={subject}
                 onChange={e => setSubject(e.target.value)}
-                placeholder="موضوع الاستفسار أو القطعة المطلوبة"
-                className="w-full text-xs py-2.5 px-3 rounded-xl border border-slate-300 focus:outline-hidden focus:border-[#FF6B00]"
+                placeholder={t.staticExtras.subjectPlaceholder}
+                className="w-full text-xs py-2.5 px-3 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-[#1E293B] text-slate-900 dark:text-white focus:outline-hidden focus:border-[#FF6B00]"
               />
             </div>
 
             <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">{t.contactModal.message} *</label>
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">{t.contactModal.message} *</label>
               <textarea
                 required
                 rows={4}
                 value={message}
                 onChange={e => setMessage(e.target.value)}
-                placeholder="اكتب تفاصيل استفسارك أو طلبك..."
-                className="w-full text-xs py-2.5 px-3 rounded-xl border border-slate-300 focus:outline-hidden focus:border-[#FF6B00]"
+                placeholder={t.staticExtras.messagePlaceholder}
+                className="w-full text-xs py-2.5 px-3 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-[#1E293B] text-slate-900 dark:text-white focus:outline-hidden focus:border-[#FF6B00]"
               />
             </div>
 
             <button
               type="submit"
-              className="px-6 py-3 bg-[#FF6B00] hover:bg-[#e05e00] text-white font-bold text-xs rounded-xl shadow-md transition-all flex items-center gap-2"
+              className="px-6 py-3 bg-[#FF6B00] hover:bg-[#e05e00] text-white font-bold text-xs rounded-xl shadow-md transition-all flex items-center gap-2 cursor-pointer"
             >
               <Send className="w-4 h-4" />
               <span>{t.contactModal.sendBtn}</span>
