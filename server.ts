@@ -19,6 +19,9 @@ import {
   adminSettleVendorPayout,
   getScopedVendorFinancials,
   getAdminPaymentOverview,
+  adminCreateManualOrder,
+  adminDeleteOrder,
+  trackPublicOrder,
   handlePaymentWebhook,
   createSupportContribution,
   adminVerifySupportTransaction,
@@ -1598,6 +1601,36 @@ app.post('/api/admin/support/verify', (req: Request, res: Response) => {
   return res.json({ success: true, supportTransaction: result.supportTransaction });
 });
 
+app.get('/api/payments/track/:code', (req: Request, res: Response) => {
+  const ip = getClientIp(req);
+  const rate = checkSlidingWindowLimit('trackOrder', ip, 40, 60 * 1000);
+  if (!rate.allowed) {
+    return res.status(429).json({ success: false, error: `تم تجاوز الحد المسموح، يرجى الانتظار ${rate.retryAfterSeconds} ثانية.` });
+  }
+  res.setHeader('Cache-Control', 'no-store');
+  const result = trackPublicOrder(req.params.code);
+  if (!result.ok) {
+    return res.status(result.statusCode || 404).json({ success: false, error: result.error });
+  }
+  return res.json({ success: true, order: result.order });
+});
+
+app.get('/api/admin/orders', (req: Request, res: Response) => {
+  if (!requireAdminAuth(req, res)) return;
+  res.setHeader('Cache-Control', 'no-store');
+  const overview = getAdminPaymentOverview();
+  return res.json({ success: true, orders: overview.orders || [] });
+});
+
+app.post('/api/admin/orders', (req: Request, res: Response) => {
+  if (!requireAdminAuth(req, res)) return;
+  const result = adminCreateManualOrder(req.body || {});
+  if (!result.ok) {
+    return res.status(result.statusCode || 400).json({ success: false, error: result.error });
+  }
+  return res.json({ success: true, order: result.order });
+});
+
 app.patch('/api/admin/orders/:orderId/status', (req: Request, res: Response) => {
   if (!requireAdminAuth(req, res)) return;
   const { status, note } = req.body || {};
@@ -1606,6 +1639,15 @@ app.patch('/api/admin/orders/:orderId/status', (req: Request, res: Response) => 
     return res.status(result.statusCode || 409).json({ success: false, error: result.error });
   }
   return res.json({ success: true, order: result.order });
+});
+
+app.delete('/api/admin/orders/:orderId', (req: Request, res: Response) => {
+  if (!requireAdminAuth(req, res)) return;
+  const result = adminDeleteOrder(req.params.orderId);
+  if (!result.ok) {
+    return res.status(result.statusCode || 404).json({ success: false, error: result.error });
+  }
+  return res.json({ success: true });
 });
 
 // 10. Live Customer Support Chat Routes

@@ -195,6 +195,8 @@ export interface PaymentSystemPublicConfig {
   currency: 'TND' | 'EUR' | 'USD';
   commissionRatePercent: number;
   taxRatePercent: number;
+  standardShippingFee?: number;
+  freeShippingThreshold?: number;
   methods: {
     cod: { enabled: boolean };
     bank_transfer: BankTransferPublicConfig;

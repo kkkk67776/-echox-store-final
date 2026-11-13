@@ -22,6 +22,7 @@ import {
   getPaymentStatusTone,
   submitBankTransferProofClient,
   submitRefundOrCancelRequest,
+  trackOrderServer,
 } from '../lib/payments';
 
 export const OrderTrackingView: React.FC = () => {
@@ -53,19 +54,25 @@ export const OrderTrackingView: React.FC = () => {
     ? orders.find((o) => o.id === searchedOrder.id || o.trackingNumber === searchedOrder.trackingNumber) || searchedOrder
     : null;
 
-  const handleSearch = (e: React.FormEvent) => {
+  const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputCode.trim()) return;
     const clean = inputCode.trim().toUpperCase();
-    const found = orders.find(
+    const localFound = orders.find(
       (o) =>
         o.trackingNumber.toUpperCase() === clean ||
         (o.paymentReference && o.paymentReference.toUpperCase() === clean)
     );
-    setSearchedOrder(found || null);
+    setSearchedOrder(localFound || null);
     setHasSearched(true);
     setActionSuccess('');
     setActionError('');
+
+    const srv = await trackOrderServer(clean);
+    if (srv.ok && srv.order) {
+      setSearchedOrder(srv.order);
+      updateOrderInState(srv.order);
+    }
   };
 
   const handleCopy = (key: string, val: string) => {

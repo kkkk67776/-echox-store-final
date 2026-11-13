@@ -116,6 +116,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
     deleteBanner,
     toggleBannerActive,
     orders, 
+    refreshAdminOrders,
     addManualOrder,
     updateOrderStatus,
     updateOrderInState,
@@ -131,6 +132,9 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
   // Active Tab
   const [activeTab, setActiveTab] = useState<DashboardTab>('overview');
   const [orderStatusError, setOrderStatusError] = useState<string | null>(null);
+  const [ordersSyncing, setOrdersSyncing] = useState(false);
+  const [ordersSyncError, setOrdersSyncError] = useState<string | null>(null);
+  const [lastOrdersSyncAt, setLastOrdersSyncAt] = useState<string | null>(null);
 
   // Confirmation Delete Modal
   const [deleteConfirmModal, setDeleteConfirmModal] = useState<{
@@ -320,6 +324,32 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
     loadSessionsAndStatus();
     return () => { active = false; };
   }, [activeTab]);
+
+  // Live Sync Server Orders into Admin Room (on open, tab focus, and 20s poll)
+  const triggerOrdersSync = async (silent = false) => {
+    if (!silent) setOrdersSyncing(true);
+    const res = await refreshAdminOrders();
+    if (!silent) setOrdersSyncing(false);
+    if (res.ok) {
+      setOrdersSyncError(null);
+      setLastOrdersSyncAt(new Date().toISOString());
+    } else if (!silent) {
+      setOrdersSyncError(res.error || 'تعذر جلب الطلبات الجديدة من الخادم.');
+    }
+  };
+
+  useEffect(() => {
+    if (!authorized) return;
+    if (activeTab === 'overview' || activeTab === 'orders') {
+      void triggerOrdersSync(false);
+    }
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        void triggerOrdersSync(true);
+      }
+    }, 20000);
+    return () => window.clearInterval(timer);
+  }, [authorized, activeTab]);
 
   if (checking) {
     return (
@@ -2380,6 +2410,17 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
             <div className="flex items-center gap-2">
               <button
                 type="button"
+                onClick={() => void triggerOrdersSync(false)}
+                disabled={ordersSyncing}
+                className="px-3 py-2.5 rounded-2xl bg-[#F8FAFC] dark:bg-[#1E293B] border border-[#E2E8F0] dark:border-slate-800 text-slate-700 dark:text-slate-200 hover:border-[#FF6B00] text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-60"
+                title="تحديث الطلبات من الخادم"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 text-[#FF6B00] ${ordersSyncing ? 'animate-spin' : ''}`} />
+                <span>{ordersSyncing ? 'جارٍ المزامنة...' : 'تحديث'}</span>
+              </button>
+
+              <button
+                type="button"
                 onClick={() => setShowAddManualOrderModal(true)}
                 className="px-3.5 py-2.5 rounded-2xl bg-[#FF6B00] hover:bg-[#E05E00] text-white text-xs font-bold flex items-center justify-center gap-1.5 shadow-xs cursor-pointer active:scale-95 shrink-0"
               >
@@ -2397,6 +2438,28 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
               </button>
             </div>
           </div>
+
+          {lastOrdersSyncAt && !ordersSyncError && (
+            <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400 px-1">
+              <span>متزامن مع الخادم المركزي • آخر تحديث: <strong className="font-mono">{new Date(lastOrdersSyncAt).toLocaleTimeString('ar-TN')}</strong></span>
+            </div>
+          )}
+
+          {ordersSyncError && (
+            <div className="p-3 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-xs font-bold text-amber-700 dark:text-amber-300 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 shrink-0" />
+                <span>{ordersSyncError}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => void triggerOrdersSync(false)}
+                className="underline cursor-pointer shrink-0"
+              >
+                إعادة المحاولة
+              </button>
+            </div>
+          )}
 
           {/* Status Filter Chips */}
           <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
@@ -2487,9 +2550,31 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
                       </a>
                     </div>
                     <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                      {o.shippingAddress?.governorate ? `ولاية ${o.shippingAddress.governorate}` : ''} • {o.shippingAddress?.city || ''} • وسيلة الدفع: <strong className="font-mono">{o.paymentMethod}</strong>
+                      {o.shippingAddress?.governorate ? `ولاية ${getGovernorateName(o.shippingAddress.governorate, language)}` : ''} • {o.shippingAddress?.city || ''} • {o.shippingAddress?.street || ''} • وسيلة الدفع: <strong className="font-mono">{o.paymentMethod}</strong>
                       {o.paymentReference && <> • المرجع: <strong className="font-mono">{o.paymentReference}</strong></>}
                     </p>
+                    {Array.isArray(o.items) && o.items.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 pt-1">
+                        {o.items.map((it, idx) => (
+                          <span
+                            key={`${o.id}_it_${idx}`}
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-white dark:bg-[#0F172A] border border-slate-200 dark:border-slate-700 text-[11px] text-slate-700 dark:text-slate-200"
+                          >
+                            <span className="font-bold text-[#FF6B00] font-mono">{it.quantity}×</span>
+                            <span className="truncate max-w-[200px]">
+                              {typeof it.productName === 'string'
+                                ? it.productName
+                                : it.productName?.ar || it.productName?.fr || it.productName?.en || it.productId}
+                            </span>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    {o.notes && (
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400 italic">
+                        ملاحظة: {o.notes}
+                      </p>
+                    )}
                   </div>
 
                   {!shipAllowed && (
@@ -2528,12 +2613,14 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
                           if (srvRes.status === 409) {
                             const errData = await srvRes.json().catch(() => ({}));
                             setOrderStatusError(errData.error || t.payments.shippingBlockedUnpaid);
+                          } else if (srvRes.status === 401 || srvRes.status === 403) {
+                            setOrderStatusError('انتهت جلسة الأمان على الخادم — يرجى إعادة تسجيل الدخول لحفظ التعديلات.');
                           } else if (srvRes.ok) {
                             const okData = await srvRes.json().catch(() => ({}));
                             if (okData?.order) updateOrderInState(okData.order);
                           }
                         } catch {
-                          // Order might exist only in local seed data
+                          setOrderStatusError('تعذر الاتصال بالخادم لتحديث حالة الطلب.');
                         }
                       }}
                       className="text-xs py-1 px-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-[#0F172A] font-bold text-[#0F172A] dark:text-white cursor-pointer"

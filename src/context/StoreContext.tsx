@@ -32,6 +32,9 @@ import {
 import {
   DEFAULT_PUBLIC_PAYMENT_CONFIG,
   fetchPublicPaymentConfig,
+  fetchAdminOrders,
+  createAdminManualOrderServer,
+  deleteAdminOrderServer,
   submitServerCheckout,
   canOrderShipClient,
   syncAdminCatalogToPaymentEngine
@@ -150,6 +153,8 @@ interface StoreContextType {
     transferProof?: Partial<TransferProof>;
   }) => Promise<{ ok: boolean; order?: Order; paymentUrl?: string; error?: string }>;
   updateOrderInState: (updatedOrder: Order) => void;
+  syncOrdersFromServer: (serverOrders: Order[]) => void;
+  refreshAdminOrders: () => Promise<{ ok: boolean; count: number; error?: string }>;
   addManualOrder: (orderData: Partial<Order>) => Order;
   updateOrderStatus: (orderId: string, status: OrderStatus, note?: string) => { ok: boolean; error?: string };
   deleteOrder: (orderId: string) => void;
@@ -345,15 +350,27 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, [companies]);
 
   // 5. Orders
+  const getDeletedOrderIds = (): string[] => {
+    try {
+      const saved = localStorage.getItem('echox_deleted_order_ids');
+      const parsed = saved ? JSON.parse(saved) : [];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  };
+
   const [orders, setOrders] = useState<Order[]>(() => {
     try {
+      const deletedIds = new Set(getDeletedOrderIds());
       const saved = localStorage.getItem('echox_orders');
-      if (!saved) return INITIAL_ORDERS;
-      const parsed: Order[] = JSON.parse(saved);
-      return parsed.map(o => ({
-        ...o,
-        items: (o.items || []).map(it => ({ ...it, productImage: normalizeAssetUrl(it.productImage) })),
-      }));
+      const base: Order[] = saved ? JSON.parse(saved) : INITIAL_ORDERS;
+      return base
+        .filter(o => !deletedIds.has(o.id) && !deletedIds.has(o.trackingNumber))
+        .map(o => ({
+          ...o,
+          items: (o.items || []).map(it => ({ ...it, productImage: normalizeAssetUrl(it.productImage) })),
+        }));
     } catch {
       return INITIAL_ORDERS;
     }
@@ -453,7 +470,22 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   // 5.3 Order Deletion & Manual Order Creation
   const deleteOrder = (orderId: string) => {
-    setOrders(prev => prev.filter(o => o.id !== orderId));
+    const target = orders.find(o => o.id === orderId || o.trackingNumber === orderId);
+    try {
+      const existing = getDeletedOrderIds();
+      const nextDeleted = Array.from(
+        new Set([
+          ...existing,
+          orderId,
+          ...(target ? [target.id, target.trackingNumber] : []),
+        ])
+      );
+      localStorage.setItem('echox_deleted_order_ids', JSON.stringify(nextDeleted.slice(-200)));
+    } catch {
+      // ignore
+    }
+    setOrders(prev => prev.filter(o => o.id !== orderId && o.trackingNumber !== orderId));
+    void deleteAdminOrderServer(orderId).catch(() => {});
   };
 
   const addManualOrder = (orderData: Partial<Order>): Order => {
@@ -492,7 +524,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       totalAmount: orderData.totalAmount || 150.000,
       status: orderData.status || 'new',
       paymentMethod: orderData.paymentMethod || 'cod',
-      paymentStatus: orderData.paymentStatus || 'pending',
+      paymentStatus: orderData.paymentStatus || 'Cash on Delivery',
       carrierName: orderData.carrierName || 'LivriTN Logistics',
       createdAt: now,
       updatedAt: now,
@@ -503,6 +535,11 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     };
 
     setOrders(prev => [created, ...prev]);
+    void createAdminManualOrderServer(created).then(res => {
+      if (res.ok && res.order) {
+        updateOrderInState(res.order);
+      }
+    }).catch(() => {});
     return created;
   };
 
@@ -666,9 +703,11 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const cartDiscountAmount = cartSubtotal * discountRate;
   const cartNetItems = Math.max(0, cartSubtotal - cartDiscountAmount);
   const cartTaxAmount = Math.round(cartNetItems * ((paymentConfig?.taxRatePercent || 0) / 100) * 1000) / 1000;
+  const effectiveFreeThreshold = paymentConfig?.freeShippingThreshold ?? siteSettings.freeShippingThreshold;
+  const effectiveStandardShipping = paymentConfig?.standardShippingFee ?? siteSettings.standardShippingFee;
   const cartShippingFee = cart.length === 0 
     ? 0 
-    : (cartSubtotal >= siteSettings.freeShippingThreshold ? 0 : siteSettings.standardShippingFee);
+    : (cartSubtotal >= effectiveFreeThreshold ? 0 : effectiveStandardShipping);
   const cartTotal = Math.max(0, Math.round((cartNetItems + cartTaxAmount + cartShippingFee) * 1000) / 1000);
 
   // 8. Wishlist
@@ -885,11 +924,51 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   // 13. Orders
   const updateOrderInState = (updatedOrder: Order) => {
+    const normalized: Order = {
+      ...updatedOrder,
+      items: (updatedOrder.items || []).map(it => ({ ...it, productImage: normalizeAssetUrl(it.productImage) })),
+    };
     setOrders(prev => {
-      const exists = prev.some(o => o.id === updatedOrder.id || o.trackingNumber === updatedOrder.trackingNumber);
-      if (!exists) return [updatedOrder, ...prev];
-      return prev.map(o => (o.id === updatedOrder.id || o.trackingNumber === updatedOrder.trackingNumber) ? updatedOrder : o);
+      const exists = prev.some(o => o.id === normalized.id || o.trackingNumber === normalized.trackingNumber);
+      if (!exists) return [normalized, ...prev];
+      return prev.map(o => (o.id === normalized.id || o.trackingNumber === normalized.trackingNumber) ? normalized : o);
     });
+  };
+
+  const syncOrdersFromServer = (serverOrders: Order[]) => {
+    if (!Array.isArray(serverOrders)) return;
+    const deletedIds = new Set(getDeletedOrderIds());
+    const normalizedServer = serverOrders
+      .filter(o => o && !deletedIds.has(o.id) && !deletedIds.has(o.trackingNumber))
+      .map(o => ({
+        ...o,
+        items: (o.items || []).map(it => ({ ...it, productImage: normalizeAssetUrl(it.productImage) })),
+      }));
+
+    setOrders(prev => {
+      const serverIds = new Set(normalizedServer.map(o => o.id));
+      const serverTracks = new Set(normalizedServer.map(o => o.trackingNumber));
+      const localOnly = prev.filter(
+        o =>
+          !deletedIds.has(o.id) &&
+          !deletedIds.has(o.trackingNumber) &&
+          !serverIds.has(o.id) &&
+          !serverTracks.has(o.trackingNumber)
+      );
+      const merged = [...normalizedServer, ...localOnly];
+      merged.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      return merged;
+    });
+  };
+
+  const refreshAdminOrders = async (): Promise<{ ok: boolean; count: number; error?: string }> => {
+    try {
+      const serverOrders = await fetchAdminOrders();
+      syncOrdersFromServer(serverOrders);
+      return { ok: true, count: serverOrders.length };
+    } catch (err: any) {
+      return { ok: false, count: 0, error: err?.message || 'تعذر مزامنة الطلبات من الخادم.' };
+    }
   };
 
   const createServerOrder = async (orderData: {
@@ -1323,6 +1402,8 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       createOrder,
       createServerOrder,
       updateOrderInState,
+      syncOrdersFromServer,
+      refreshAdminOrders,
       addManualOrder,
       updateOrderStatus,
       deleteOrder,
