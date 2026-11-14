@@ -10,6 +10,6 @@ services:
       - key: NODE_ENV
         value: production
       - key: SITE_URL
-        value: https://echoxstore.onrender.com
+        value: https://echox-store.onrender.com
       - key: ECHOX_SECURITY_HMAC_SECRET
         generateValue: true

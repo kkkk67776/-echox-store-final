@@ -12,6 +12,7 @@ import {
   ShieldCheck,
   Loader2,
   Upload,
+  ExternalLink,
 } from 'lucide-react';
 import { useStore } from '../context/StoreContext';
 import { contributeToEchox, getPaymentStatusTone } from '../lib/payments';
@@ -51,6 +52,7 @@ export const SupportEchoxModal: React.FC = () => {
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [receipt, setReceipt] = useState<SupportTransaction | null>(null);
+  const [gatewayPayUrl, setGatewayPayUrl] = useState<string | undefined>(undefined);
   const [copiedField, setCopiedField] = useState<string | null>(null);
 
   if (!isSupportModalOpen) return null;
@@ -72,6 +74,7 @@ export const SupportEchoxModal: React.FC = () => {
 
   const resetAndClose = () => {
     setReceipt(null);
+    setGatewayPayUrl(undefined);
     setErrorMsg('');
     setProofRef('');
     setProofSender('');
@@ -131,6 +134,7 @@ export const SupportEchoxModal: React.FC = () => {
     }
 
     setReceipt(res.supportTransaction);
+    setGatewayPayUrl(res.paymentUrl);
   };
 
   return (
@@ -197,6 +201,27 @@ export const SupportEchoxModal: React.FC = () => {
                   </span>
                 </div>
               </div>
+
+              {receipt.method === 'online_payment' && gatewayPayUrl && gatewayPayUrl.startsWith('https://') && (
+                <div className="p-4 rounded-2xl bg-blue-50 dark:bg-blue-500/10 border border-blue-200 dark:border-blue-500/30 text-center space-y-2.5">
+                  <p className="text-xs font-bold text-blue-900 dark:text-blue-200">
+                    {language === 'ar'
+                      ? 'تم تجهيز جلسة الدفع المؤمّنة لمساهمتك. اضغط لإتمام السداد عبر البوابة.'
+                      : language === 'fr'
+                      ? 'Session de paiement prête. Cliquez pour finaliser votre contribution.'
+                      : 'Secure payment session ready. Click below to complete your contribution.'}
+                  </p>
+                  <a
+                    href={gatewayPayUrl}
+                    target={typeof window !== 'undefined' && window.self !== window.top ? '_blank' : '_self'}
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#FF6B00] hover:bg-[#e05e00] text-white text-xs font-bold"
+                  >
+                    <span>{language === 'ar' ? 'إتمام الدفع الإلكتروني الآمن الآن' : language === 'fr' ? 'Finaliser le paiement' : 'Complete Online Payment'}</span>
+                    <ExternalLink className="w-3.5 h-3.5" />
+                  </a>
+                </div>
+              )}
 
               {receipt.method === 'bank_transfer' && bankEnabled && (
                 <div className="p-3.5 rounded-2xl bg-[#F8FAFC] dark:bg-[#1E293B] border border-[#E2E8F0] dark:border-slate-700 space-y-2 text-xs">

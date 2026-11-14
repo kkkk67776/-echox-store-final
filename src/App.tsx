@@ -14,6 +14,8 @@ import { Footer } from './components/Footer';
 import { BottomNavigation } from './components/BottomNavigation';
 import OwnerSecurityRoom from './components/security/OwnerSecurityRoom';
 import { applySeo } from './lib/seo';
+import { verifyGatewayReturnClient } from './lib/payments';
+import { CheckCircle2, AlertCircle, X } from 'lucide-react';
 
 const CheckoutModal = lazy(() => import('./components/CheckoutModal').then(m => ({ default: m.CheckoutModal })));
 const SupportEchoxModal = lazy(() => import('./components/SupportEchoxModal').then(m => ({ default: m.SupportEchoxModal })));
@@ -73,10 +75,17 @@ const AppContent: React.FC = () => {
     setSelectedProductId,
     setSelectedCategory,
     setSearchQuery,
+    updateOrderInState,
   } = useStore();
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
   const [navState, setNavState] = useState<{ challengeId?: string; devTestHint?: string }>({});
   const [vaultOpenNonce, setVaultOpenNonce] = useState(0);
+  const [paymentReturnBanner, setPaymentReturnBanner] = useState<{
+    status: 'paid' | 'pending' | 'failed';
+    kind?: 'order' | 'support';
+    tracking?: string;
+    message: string;
+  } | null>(null);
 
   const requestOpenVault = useCallback(() => {
     (window as any).__echoxVaultOpenPending = true;
@@ -117,6 +126,61 @@ const AppContent: React.FC = () => {
         setSearchQuery(urlSearch);
       }
 
+      const paymentReturn = params.get('payment_return');
+      const trackingParam = params.get('tracking') || undefined;
+      const paymentRefParam = params.get('payment_ref') || params.get('payment_id') || undefined;
+      const providerParam = params.get('provider') || undefined;
+
+      if (paymentReturn && (trackingParam || paymentRefParam)) {
+        const cleanParams = new URLSearchParams(params.toString());
+        ['payment_return', 'tracking', 'payment_ref', 'payment_id', 'provider'].forEach((k) => cleanParams.delete(k));
+        const nextQs = cleanParams.toString();
+        window.history.replaceState({}, '', `${path}${nextQs ? `?${nextQs}` : ''}`);
+
+        void verifyGatewayReturnClient({
+          tracking: trackingParam,
+          paymentRef: paymentRefParam,
+          provider: providerParam,
+        }).then((res) => {
+          if (res.ok) {
+            if (res.kind === 'order' && res.order) {
+              updateOrderInState(res.order);
+            }
+            if (res.paymentStatus === 'Paid') {
+              setPaymentReturnBanner({
+                status: 'paid',
+                kind: res.kind,
+                tracking: res.order?.trackingNumber || res.supportTransaction?.supportReference || trackingParam,
+                message:
+                  res.kind === 'support'
+                    ? 'تم تأكيد مساهمة دعم ECHOX الإلكترونية بنجاح ✓'
+                    : `تم تأكيد دفع الطلب (${res.order?.trackingNumber || trackingParam}) بنجاح ✓`,
+              });
+            } else if (paymentReturn === 'fail' || res.paymentStatus === 'Payment Failed') {
+              setPaymentReturnBanner({
+                status: 'failed',
+                kind: res.kind,
+                tracking: trackingParam,
+                message: `لم تكتمل عملية الدفع الإلكتروني للطلب (${trackingParam || ''}). يمكنك المحاولة مجدداً من صفحة التتبع.`,
+              });
+            } else {
+              setPaymentReturnBanner({
+                status: 'pending',
+                kind: res.kind,
+                tracking: trackingParam,
+                message: `تم استلام عودتك من بوابة الدفع (${trackingParam || ''})، وبانتظار تأكيد البوابة النهائي.`,
+              });
+            }
+          } else if (paymentReturn === 'fail') {
+            setPaymentReturnBanner({
+              status: 'failed',
+              tracking: trackingParam,
+              message: 'تم إلغاء عملية الدفع الإلكتروني أو فشل التحقق منها.',
+            });
+          }
+        });
+      }
+
       if (path === '/owner/dashboard' || path === '/owner_dashboard') {
         setCurrentView('/owner/dashboard');
       } else if (path === '/owner/login' || path === '/owner/lock' || path === '/owner/security-code') {
@@ -143,7 +207,7 @@ const AppContent: React.FC = () => {
     syncRouteFromUrl();
     window.addEventListener('popstate', syncRouteFromUrl);
     return () => window.removeEventListener('popstate', syncRouteFromUrl);
-  }, [setCurrentView, setLanguage, setSelectedCategory, setSelectedProductId, setSearchQuery, requestOpenVault]);
+  }, [setCurrentView, setLanguage, setSelectedCategory, setSelectedProductId, setSearchQuery, requestOpenVault, updateOrderInState]);
 
   const activeProduct = products.find((p) => p.id === selectedProductId) || null;
 
@@ -172,6 +236,49 @@ const AppContent: React.FC = () => {
     <div className="min-h-screen flex flex-col bg-white dark:bg-[#0B0F17] text-[#0F172A] dark:text-slate-100 selection:bg-[#FF6B00] selection:text-white transition-colors overflow-x-hidden max-w-[100vw] w-full">
       {/* 1. Header */}
       <Header />
+
+      {/* Gateway Payment Return Notice */}
+      {paymentReturnBanner && (
+        <div className="max-w-6xl mx-auto w-full px-4 pt-3">
+          <div
+            className={`p-3.5 rounded-2xl border text-xs font-bold flex flex-wrap items-center justify-between gap-3 ${
+              paymentReturnBanner.status === 'paid'
+                ? 'bg-emerald-50 dark:bg-emerald-500/10 border-emerald-200 dark:border-emerald-500/30 text-emerald-800 dark:text-emerald-300'
+                : paymentReturnBanner.status === 'failed'
+                ? 'bg-red-50 dark:bg-red-500/10 border-red-200 dark:border-red-500/30 text-red-800 dark:text-red-300'
+                : 'bg-amber-50 dark:bg-amber-500/10 border-amber-200 dark:border-amber-500/30 text-amber-800 dark:text-amber-300'
+            }`}
+          >
+            <div className="flex items-center gap-2">
+              {paymentReturnBanner.status === 'paid' ? (
+                <CheckCircle2 className="w-4 h-4 shrink-0" />
+              ) : (
+                <AlertCircle className="w-4 h-4 shrink-0" />
+              )}
+              <span>{paymentReturnBanner.message}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              {paymentReturnBanner.kind === 'order' && (
+                <button
+                  type="button"
+                  onClick={() => handleNavigate('/my_orders')}
+                  className="px-3 py-1.5 rounded-xl bg-[#FF6B00] text-white text-[11px] font-bold cursor-pointer"
+                >
+                  عرض طلباتي
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setPaymentReturnBanner(null)}
+                className="p-1 rounded-lg hover:bg-black/5 dark:hover:bg-white/10 cursor-pointer"
+                aria-label="Dismiss payment banner"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 2. Main View Router */}
       <main className="flex-1 w-full max-w-full overflow-x-hidden">

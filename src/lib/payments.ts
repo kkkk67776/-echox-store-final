@@ -151,6 +151,7 @@ export async function submitServerCheckout(payload: {
   carrierName?: string;
   notes?: string;
   transferProof?: Partial<TransferProof>;
+  clientRequestId?: string;
 }): Promise<{ ok: boolean; order?: Order; transaction?: PaymentTransaction; paymentUrl?: string; error?: string }> {
   const res = await fetch('/api/payments/checkout', {
     method: 'POST',
@@ -162,6 +163,36 @@ export async function submitServerCheckout(payload: {
     return { ok: false, error: data.error || 'Checkout validation failed' };
   }
   return { ok: true, order: data.order, transaction: data.transaction, paymentUrl: data.paymentUrl };
+}
+
+export async function verifyGatewayReturnClient(params: {
+  tracking?: string;
+  paymentRef?: string;
+  provider?: string;
+}): Promise<{
+  ok: boolean;
+  kind?: 'order' | 'support';
+  paymentStatus?: PaymentStatus;
+  order?: Order;
+  supportTransaction?: SupportTransaction;
+  error?: string;
+}> {
+  const qs = new URLSearchParams();
+  if (params.tracking) qs.set('tracking', params.tracking);
+  if (params.paymentRef) qs.set('payment_ref', params.paymentRef);
+  if (params.provider) qs.set('provider', params.provider);
+  const res = await fetch(`/api/payments/verify-return?${qs.toString()}`, { cache: 'no-store' });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.success) {
+    return { ok: false, error: data.error || 'Return verification failed' };
+  }
+  return {
+    ok: true,
+    kind: data.kind,
+    paymentStatus: data.paymentStatus,
+    order: data.order,
+    supportTransaction: data.supportTransaction,
+  };
 }
 
 export async function submitBankTransferProofClient(payload: {
@@ -211,7 +242,7 @@ export async function contributeToEchox(payload: {
   supporterEmail?: string;
   note?: string;
   transferProof?: Partial<TransferProof>;
-}): Promise<{ ok: boolean; supportTransaction?: SupportTransaction; error?: string }> {
+}): Promise<{ ok: boolean; supportTransaction?: SupportTransaction; paymentUrl?: string; error?: string }> {
   const res = await fetch('/api/support/contribute', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -221,7 +252,7 @@ export async function contributeToEchox(payload: {
   if (!res.ok || !data.success) {
     return { ok: false, error: data.error || 'Support contribution failed' };
   }
-  return { ok: true, supportTransaction: data.supportTransaction };
+  return { ok: true, supportTransaction: data.supportTransaction, paymentUrl: data.paymentUrl };
 }
 
 export async function fetchScopedVendorFinancials(vendorId: string): Promise<ScopedVendorFinancialsResponse> {

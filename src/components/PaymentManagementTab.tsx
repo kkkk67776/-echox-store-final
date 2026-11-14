@@ -109,6 +109,7 @@ export const PaymentManagementTab: React.FC = () => {
 
   const [savingConfig, setSavingConfig] = useState(false);
   const [testingGateway, setTestingGateway] = useState(false);
+  const [copiedWebhook, setCopiedWebhook] = useState(false);
   const [gatewayTestResult, setGatewayTestResult] = useState<{
     ok: boolean;
     message: string;
@@ -884,7 +885,13 @@ export const PaymentManagementTab: React.FC = () => {
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
                 <label className="text-[11px] font-bold flex items-center justify-between mb-1">
-                  <span>API Key (للكتابة فقط)</span>
+                  <span>
+                    {onlineProvider === 'flouci'
+                      ? 'Flouci App Token'
+                      : onlineProvider === 'konnect'
+                      ? 'Konnect API Key'
+                      : 'API Key (للكتابة فقط)'}
+                  </span>
                   {currentCfg.methods.online_payment.hasApiKey && (
                     <span className="text-[10px] text-emerald-600 font-mono">
                       ✓ {currentCfg.methods.online_payment.apiKeyMasked}
@@ -898,6 +905,8 @@ export const PaymentManagementTab: React.FC = () => {
                   placeholder={
                     currentCfg.methods.online_payment.hasApiKey
                       ? '•••••••• (اتركه فارغاً للإبقاء على الحالي)'
+                      : onlineProvider === 'flouci'
+                      ? 'أدخل Flouci App Token...'
                       : 'أدخل API Key الحقيقي...'
                   }
                   dir="ltr"
@@ -907,7 +916,13 @@ export const PaymentManagementTab: React.FC = () => {
 
               <div>
                 <label className="text-[11px] font-bold flex items-center justify-between mb-1">
-                  <span>Wallet / Receiver ID</span>
+                  <span>
+                    {onlineProvider === 'flouci'
+                      ? 'Flouci App Secret'
+                      : onlineProvider === 'konnect'
+                      ? 'Receiver Wallet ID'
+                      : 'Wallet / Receiver ID'}
+                  </span>
                   {currentCfg.methods.online_payment.hasWalletId && (
                     <span className="text-[10px] text-emerald-600 font-mono">
                       ✓ {currentCfg.methods.online_payment.walletIdMasked}
@@ -921,6 +936,8 @@ export const PaymentManagementTab: React.FC = () => {
                   placeholder={
                     currentCfg.methods.online_payment.hasWalletId
                       ? '•••••••• (اتركه فارغاً للإبقاء على الحالي)'
+                      : onlineProvider === 'flouci'
+                      ? 'أدخل Flouci App Secret...'
                       : 'أدخل Receiver Wallet ID...'
                   }
                   dir="ltr"
@@ -945,6 +962,31 @@ export const PaymentManagementTab: React.FC = () => {
                 />
               </div>
             </div>
+
+            {typeof window !== 'undefined' && (
+              <div className="p-3 rounded-2xl bg-white dark:bg-[#0F172A] border border-slate-200 dark:border-slate-700 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-[11px]">
+                <div className="min-w-0">
+                  <span className="font-bold text-slate-500 block">
+                    {language === 'ar' ? 'رابط Webhook الرسمي للمزوّد:' : 'Gateway Webhook URL:'}
+                  </span>
+                  <code className="font-mono text-slate-800 dark:text-slate-200 break-all" dir="ltr">
+                    {`${window.location.origin}/api/payments/webhook/${onlineProvider}`}
+                  </code>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const url = `${window.location.origin}/api/payments/webhook/${onlineProvider}`;
+                    navigator.clipboard?.writeText(url).catch(() => {});
+                    setCopiedWebhook(true);
+                    setTimeout(() => setCopiedWebhook(false), 2000);
+                  }}
+                  className="px-3 py-1.5 rounded-xl border border-slate-300 dark:border-slate-600 hover:border-[#FF6B00] font-bold shrink-0 cursor-pointer"
+                >
+                  {copiedWebhook ? t.payments.copied : t.payments.copy}
+                </button>
+              </div>
+            )}
 
             <div className="flex flex-wrap items-center justify-between gap-2 pt-2">
               <button

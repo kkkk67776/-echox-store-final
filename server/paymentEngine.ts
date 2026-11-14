@@ -59,6 +59,7 @@ interface PaymentSystemDatabase {
   supportTransactions: SupportTransaction[];
   activityLogs: FinancialActivityLog[];
   processedWebhookKeys: string[];
+  recentCheckoutRequests?: Array<{ key: string; orderId: string; paymentUrl?: string; createdAt: number }>;
 }
 
 function maskSecret(val: string): string | undefined {
@@ -222,17 +223,30 @@ function saveDatabase(db: PaymentSystemDatabase): void {
 
 let paymentDb: PaymentSystemDatabase = loadDatabase();
 
+let cachedFallbackSecret: string | null = null;
+
 function getBankIntegritySecret(): string {
   const fromEnv = (process.env.ECHOX_SECURITY_HMAC_SECRET || '').trim();
   if (fromEnv.length >= 16) return fromEnv;
+  if (cachedFallbackSecret) return cachedFallbackSecret;
+
   const secretFile = getDataFilePath('.hmac_secret');
   try {
     if (fs.existsSync(secretFile)) {
       const stored = fs.readFileSync(secretFile, 'utf-8').trim();
-      if (stored.length >= 16) return stored;
+      if (stored.length >= 16) {
+        cachedFallbackSecret = stored;
+        return stored;
+      }
     }
   } catch {}
-  return 'echox-bank-local-seal-v1';
+
+  const generated = crypto.randomBytes(48).toString('hex');
+  try {
+    fs.writeFileSync(secretFile, generated, { encoding: 'utf-8', mode: 0o600 });
+  } catch {}
+  cachedFallbackSecret = generated;
+  return generated;
 }
 
 function getCanonicalBankFields(bank: {
@@ -249,16 +263,28 @@ function getCanonicalBankFields(bank: {
   ].join('|');
 }
 
+function computeBankSealWithKey(
+  bank: {
+    accountHolder?: string;
+    bankName?: string;
+    ibanOrRib?: string;
+    swiftCode?: string;
+  },
+  secret: string
+): string {
+  return crypto
+    .createHmac('sha256', secret)
+    .update(`bank:${getCanonicalBankFields(bank)}`)
+    .digest('hex');
+}
+
 function computeBankSeal(bank: {
   accountHolder?: string;
   bankName?: string;
   ibanOrRib?: string;
   swiftCode?: string;
 }): string {
-  return crypto
-    .createHmac('sha256', getBankIntegritySecret())
-    .update(`bank:${getCanonicalBankFields(bank)}`)
-    .digest('hex');
+  return computeBankSealWithKey(bank, getBankIntegritySecret());
 }
 
 function computeIbanFingerprint(ibanOrRib: string): string {
@@ -269,7 +295,8 @@ function computeIbanFingerprint(ibanOrRib: string): string {
 }
 
 function ensureInitialBankSeal(): void {
-  if (!paymentDb.config.bankIntegritySeal) {
+  const legacySeal = computeBankSealWithKey(paymentDb.config.methods.bank_transfer, 'echox-bank-local-seal-v1');
+  if (!paymentDb.config.bankIntegritySeal || paymentDb.config.bankIntegritySeal === legacySeal) {
     paymentDb.config.bankIntegritySeal = computeBankSeal(paymentDb.config.methods.bank_transfer);
     saveDatabase(paymentDb);
   }
@@ -282,7 +309,8 @@ export async function hydratePaymentDbFromCloud(): Promise<void> {
   const remote = await loadCloudJson<Partial<PaymentSystemDatabase>>(CLOUD_PAYMENT_KEY);
   if (remote && typeof remote === 'object') {
     paymentDb = mergeDatabaseSnapshot(remote);
-    if (!paymentDb.config.bankIntegritySeal) {
+    const legacySeal = computeBankSealWithKey(paymentDb.config.methods.bank_transfer, 'echox-bank-local-seal-v1');
+    if (!paymentDb.config.bankIntegritySeal || paymentDb.config.bankIntegritySeal === legacySeal) {
       paymentDb.config.bankIntegritySeal = computeBankSeal(paymentDb.config.methods.bank_transfer);
     }
     try {
@@ -398,6 +426,34 @@ function normalizePhone(phone: string): string {
   return (phone || '').replace(/\D/g, '').slice(-8);
 }
 
+function sanitizeReceiptImageDataUrl(raw?: string): { ok: boolean; value?: string; error?: string } {
+  if (!raw || typeof raw !== 'string') return { ok: true, value: undefined };
+  const trimmed = raw.trim();
+  if (!trimmed) return { ok: true, value: undefined };
+  if (trimmed.length > 4_800_000) {
+    return { ok: false, error: 'حجم صورة وصل التحويل كبير جداً (الحد الأقصى 3.5 ميغابايت).' };
+  }
+  const rasterMatch = /^data:image\/(png|jpeg|jpg|webp|gif);base64,[A-Za-z0-9+/=\s]+$/i.test(trimmed);
+  if (!rasterMatch) {
+    return { ok: false, error: 'صيغة صورة الوصل غير مدعومة لأسباب أمنية. يرجى رفع صورة PNG أو JPG أو WEBP فقط.' };
+  }
+  return { ok: true, value: trimmed.replace(/\s+/g, '') };
+}
+
+function isSafeHttpsUrl(rawUrl?: string): boolean {
+  if (!rawUrl || typeof rawUrl !== 'string') return false;
+  try {
+    const u = new URL(rawUrl);
+    return u.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+function toMinorUnits(amount: number, currency: string): number {
+  return currency === 'TND' ? Math.round(amount * 1000) : Math.round(amount * 100);
+}
+
 export function normalizePaymentMethod(method: PaymentMethodType): 'cod' | 'bank_transfer' | 'online_payment' {
   if (method === 'bank_transfer') return 'bank_transfer';
   if (method === 'online_payment' || method === 'konnect' || method === 'flouci') return 'online_payment';
@@ -406,12 +462,19 @@ export function normalizePaymentMethod(method: PaymentMethodType): 'cod' | 'bank
 
 export function isOnlineGatewayReady(): boolean {
   const s = paymentDb.config.secrets;
-  return Boolean(s.apiKey && s.apiKey.trim().length >= 8 && s.walletId && s.walletId.trim().length >= 4);
+  const provider = paymentDb.config.methods.online_payment.provider || 'konnect';
+  const hasBasicKeys = Boolean(s.apiKey && s.apiKey.trim().length >= 8 && s.walletId && s.walletId.trim().length >= 4);
+  if (!hasBasicKeys) return false;
+  if (provider === 'stripe_custom') {
+    return Boolean(s.webhookSecret && s.webhookSecret.trim().length >= 8);
+  }
+  return true;
 }
 
 export function getPublicPaymentConfig(): PaymentSystemPublicConfig {
   const cfg = paymentDb.config;
   const ready = isOnlineGatewayReady();
+  const provider = cfg.methods.online_payment.provider || 'konnect';
   return {
     currency: cfg.currency,
     commissionRatePercent: cfg.commissionRatePercent,
@@ -423,7 +486,7 @@ export function getPublicPaymentConfig(): PaymentSystemPublicConfig {
       bank_transfer: getVerifiedBankTransferPublic(),
       online_payment: {
         enabled: !!cfg.methods.online_payment.enabled && ready,
-        provider: cfg.methods.online_payment.provider || 'konnect',
+        provider,
         mode: cfg.methods.online_payment.mode || 'sandbox',
         hasApiKey: Boolean(cfg.secrets.apiKey && cfg.secrets.apiKey.trim().length > 0),
         hasWalletId: Boolean(cfg.secrets.walletId && cfg.secrets.walletId.trim().length > 0),
@@ -432,16 +495,22 @@ export function getPublicPaymentConfig(): PaymentSystemPublicConfig {
         walletIdMasked: maskSecret(cfg.secrets.walletId),
         readyForLive: ready,
         lastConnectionCheck: cfg.methods.online_payment.lastConnectionCheck,
+        webhookPath: `/api/payments/webhook/${provider}`,
       },
     },
     updatedAt: cfg.updatedAt,
   };
 }
 
-export function syncCatalogSnapshot(products: Array<{ id: string; price: number; companyId?: string; companyName?: string; active?: boolean }>): void {
+export function syncCatalogSnapshot(
+  products: Array<{ id: string; price: number; companyId?: string; companyName?: string; active?: boolean }>,
+  options?: { replaceAll?: boolean }
+): void {
   if (!Array.isArray(products)) return;
+  const seenIds = new Set<string>();
   for (const p of products) {
-    if (!p || !p.id || typeof p.price !== 'number' || p.price < 0) continue;
+    if (!p || !p.id || typeof p.price !== 'number' || !Number.isFinite(p.price) || p.price < 0) continue;
+    seenIds.add(p.id);
     paymentDb.catalog[p.id] = {
       id: p.id,
       price: round3(p.price),
@@ -449,6 +518,13 @@ export function syncCatalogSnapshot(products: Array<{ id: string; price: number;
       companyName: p.companyName || 'ECHOX Distribution Tunisie',
       active: p.active !== false,
     };
+  }
+  if (options?.replaceAll) {
+    Object.keys(paymentDb.catalog).forEach((catId) => {
+      if (!seenIds.has(catId) && paymentDb.catalog[catId]) {
+        paymentDb.catalog[catId].active = false;
+      }
+    });
   }
   saveDatabase(paymentDb);
 }
@@ -560,15 +636,18 @@ export function updateAdminPaymentConfig(payload: {
 
 export async function testOnlineGatewayConnection(): Promise<{ ok: boolean; message: string; checkedAt: string }> {
   const checkedAt = new Date().toISOString();
+  const provider = paymentDb.config.methods.online_payment.provider || 'konnect';
+  const mode = paymentDb.config.methods.online_payment.mode || 'sandbox';
+
   if (!isOnlineGatewayReady()) {
-    const msg = 'Gateway credentials missing: Configure real Provider API Key and Wallet ID on server first.';
+    const msg =
+      provider === 'stripe_custom'
+        ? 'Gateway credentials missing: Custom/Stripe Bridge requires API Key, Wallet ID, and Webhook HMAC Secret.'
+        : 'Gateway credentials missing: Configure real Provider API Key/App Token and Wallet ID/App Secret on server first.';
     paymentDb.config.methods.online_payment.lastConnectionCheck = { checkedAt, ok: false, message: msg };
     saveDatabase(paymentDb);
     return { ok: false, message: msg, checkedAt };
   }
-
-  const provider = paymentDb.config.methods.online_payment.provider;
-  const mode = paymentDb.config.methods.online_payment.mode;
 
   if (provider === 'konnect') {
     const baseUrl =
@@ -581,8 +660,8 @@ export async function testOnlineGatewayConnection(): Promise<{ ok: boolean; mess
         headers: {
           'x-api-key': paymentDb.config.secrets.apiKey,
         },
+        signal: AbortSignal.timeout(10000),
       });
-      // A 404 or 401 distinguishes valid API key format vs rejected key
       if (resp.status === 401 || resp.status === 403) {
         const msg = `Konnect rejected credentials (HTTP ${resp.status}). Verify API Key matches ${mode} environment.`;
         paymentDb.config.methods.online_payment.lastConnectionCheck = { checkedAt, ok: false, message: msg };
@@ -602,10 +681,300 @@ export async function testOnlineGatewayConnection(): Promise<{ ok: boolean; mess
     }
   }
 
-  const msg = `Custom gateway (${provider}) credentials saved; live handshake depends on external webhook endpoint validation.`;
+  if (provider === 'flouci') {
+    if (paymentDb.config.currency !== 'TND') {
+      const msg = 'Flouci Tunisia supports TND currency only. Change store currency to TND first.';
+      paymentDb.config.methods.online_payment.lastConnectionCheck = { checkedAt, ok: false, message: msg };
+      saveDatabase(paymentDb);
+      return { ok: false, message: msg, checkedAt };
+    }
+    try {
+      const resp = await fetch('https://developers.flouci.com/api/verify_payment/test_check', {
+        method: 'GET',
+        headers: {
+          apppublic: paymentDb.config.secrets.apiKey,
+          appsecret: paymentDb.config.secrets.walletId,
+        },
+        signal: AbortSignal.timeout(10000),
+      });
+      if (resp.status === 401 || resp.status === 403) {
+        const msg = `Flouci rejected App Token / App Secret (HTTP ${resp.status}).`;
+        paymentDb.config.methods.online_payment.lastConnectionCheck = { checkedAt, ok: false, message: msg };
+        saveDatabase(paymentDb);
+        return { ok: false, message: msg, checkedAt };
+      }
+      const msg = `Flouci endpoint reachable and credentials format accepted (HTTP ${resp.status}).`;
+      paymentDb.config.methods.online_payment.lastConnectionCheck = { checkedAt, ok: true, message: msg };
+      appendActivity('GATEWAY_TEST_PASSED', 'admin', msg);
+      saveDatabase(paymentDb);
+      return { ok: true, message: msg, checkedAt };
+    } catch (err: any) {
+      const msg = `Flouci connection check failed: ${err?.message || 'Network error'}`;
+      paymentDb.config.methods.online_payment.lastConnectionCheck = { checkedAt, ok: false, message: msg };
+      saveDatabase(paymentDb);
+      return { ok: false, message: msg, checkedAt };
+    }
+  }
+
+  const msg = `Custom/Stripe Bridge configured with HMAC Webhook secret. Note: automatic checkout redirect requires Konnect or Flouci.`;
   paymentDb.config.methods.online_payment.lastConnectionCheck = { checkedAt, ok: true, message: msg };
   saveDatabase(paymentDb);
   return { ok: true, message: msg, checkedAt };
+}
+
+function sanitizeOrigin(rawOrigin?: string): string {
+  const fallback = (process.env.SITE_URL || process.env.VITE_SITE_URL || 'https://echox-store.onrender.com').trim().replace(/\/$/, '');
+  if (!rawOrigin || typeof rawOrigin !== 'string') return fallback;
+  try {
+    const u = new URL(rawOrigin.trim());
+    if (u.protocol === 'https:' || u.protocol === 'http:') {
+      return `${u.protocol}//${u.host}`;
+    }
+  } catch {}
+  return fallback;
+}
+
+async function initiateGatewaySession(params: {
+  amount: number;
+  currency: 'TND' | 'EUR' | 'USD';
+  trackingRef: string;
+  description: string;
+  customerName: string;
+  customerPhone: string;
+  customerEmail?: string;
+  origin?: string;
+}): Promise<{ ok: boolean; statusCode?: number; error?: string; externalPaymentId?: string; paymentUrl?: string; provider?: string }> {
+  const cfg = paymentDb.config;
+  const provider = cfg.methods.online_payment.provider || 'konnect';
+  const mode = cfg.methods.online_payment.mode || 'sandbox';
+  const origin = sanitizeOrigin(params.origin);
+  const amountMinor = toMinorUnits(params.amount, params.currency);
+
+  const successUrl = `${origin}/?payment_return=success&provider=${encodeURIComponent(provider)}&tracking=${encodeURIComponent(params.trackingRef)}`;
+  const failUrl = `${origin}/?payment_return=fail&provider=${encodeURIComponent(provider)}&tracking=${encodeURIComponent(params.trackingRef)}`;
+
+  if (provider === 'konnect') {
+    const endpoint =
+      mode === 'live'
+        ? 'https://api.konnect.network/api/v2/payments/init-payment'
+        : 'https://api.sandbox.konnect.network/api/v2/payments/init-payment';
+    try {
+      const initRes = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': cfg.secrets.apiKey,
+        },
+        body: JSON.stringify({
+          receiverWalletId: cfg.secrets.walletId,
+          token: params.currency,
+          amount: amountMinor,
+          type: 'immediate',
+          description: params.description,
+          acceptedPaymentMethods: ['wallet', 'bank_card', 'e-DINAR'],
+          lifespan: 20,
+          checkoutForm: true,
+          addPaymentFeesToAmount: false,
+          orderId: params.trackingRef,
+          firstName: params.customerName.trim(),
+          phoneNumber: params.customerPhone.trim(),
+          email: params.customerEmail?.trim() || undefined,
+          webhook: `${origin}/api/payments/webhook/konnect`,
+          successUrl,
+          failUrl,
+          silentWebhook: true,
+        }),
+        signal: AbortSignal.timeout(10000),
+      });
+      const initJson: any = await initRes.json().catch(() => ({}));
+      if (!initRes.ok || !isSafeHttpsUrl(initJson?.payUrl)) {
+        appendActivity(
+          'ONLINE_GATEWAY_INIT_FAILED',
+          'system',
+          `Konnect init failed for ${params.trackingRef}: HTTP ${initRes.status} ${JSON.stringify(initJson)}`
+        );
+        saveDatabase(paymentDb);
+        return {
+          ok: false,
+          statusCode: 502,
+          error: initJson?.message || 'فشل إنشاء جلسة الدفع الإلكتروني مع بوابة Konnect. يرجى التحقق من المفاتيح أو اختيار وسيلة أخرى.',
+        };
+      }
+      return {
+        ok: true,
+        provider: 'konnect',
+        externalPaymentId: String(initJson.paymentRef || ''),
+        paymentUrl: initJson.payUrl,
+      };
+    } catch (err: any) {
+      appendActivity('ONLINE_GATEWAY_NETWORK_ERROR', 'system', `Konnect init network failure: ${err?.message}`);
+      saveDatabase(paymentDb);
+      return {
+        ok: false,
+        statusCode: 502,
+        error: 'تعذر الاتصال ببوابة Konnect حالياً. يرجى استخدام التحويل البنكي أو الدفع عند الاستلام.',
+      };
+    }
+  }
+
+  if (provider === 'flouci') {
+    if (params.currency !== 'TND') {
+      return {
+        ok: false,
+        statusCode: 400,
+        error: 'بوابة Flouci Tunisia تقبل عملة الدينار التونسي (TND) فقط.',
+      };
+    }
+    try {
+      const initRes = await fetch('https://developers.flouci.com/api/generate_payment', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          app_token: cfg.secrets.apiKey,
+          app_secret: cfg.secrets.walletId,
+          amount: amountMinor,
+          accept_card: 'true',
+          session_timeout_secs: 1200,
+          success_link: successUrl,
+          fail_link: failUrl,
+          developer_tracking_id: params.trackingRef,
+        }),
+        signal: AbortSignal.timeout(10000),
+      });
+      const initJson: any = await initRes.json().catch(() => ({}));
+      const payLink = initJson?.result?.link;
+      const payId = initJson?.result?.payment_id;
+      if (!initRes.ok || !initJson?.result?.success || !isSafeHttpsUrl(payLink)) {
+        appendActivity(
+          'ONLINE_GATEWAY_INIT_FAILED',
+          'system',
+          `Flouci init failed for ${params.trackingRef}: HTTP ${initRes.status} ${JSON.stringify(initJson)}`
+        );
+        saveDatabase(paymentDb);
+        return {
+          ok: false,
+          statusCode: 502,
+          error: 'فشل إنشاء جلسة الدفع عبر بوابة Flouci. يرجى التحقق من App Token و App Secret في مركز التحكم.',
+        };
+      }
+      return {
+        ok: true,
+        provider: 'flouci',
+        externalPaymentId: String(payId || ''),
+        paymentUrl: payLink,
+      };
+    } catch (err: any) {
+      appendActivity('ONLINE_GATEWAY_NETWORK_ERROR', 'system', `Flouci init network failure: ${err?.message}`);
+      saveDatabase(paymentDb);
+      return {
+        ok: false,
+        statusCode: 502,
+        error: 'تعذر الاتصال ببوابة Flouci حالياً. يرجى استخدام التحويل البنكي أو الدفع عند الاستلام.',
+      };
+    }
+  }
+
+  return {
+    ok: false,
+    statusCode: 400,
+    error: 'البوابة المختارة (Custom Bridge) تتطلب ربط رابط دفع خارجي مخصص؛ يرجى اختيار Konnect أو Flouci للدفع المباشر.',
+  };
+}
+
+async function verifyGatewayPaymentRef(params: {
+  provider: string;
+  payRef: string;
+  expectedAmount: number;
+  expectedCurrency: string;
+}): Promise<{ ok: boolean; status: 'completed' | 'pending' | 'failed'; reason?: string; statusCode?: number }> {
+  const cfg = paymentDb.config;
+  const secrets = cfg.secrets;
+  const expectedMinor = toMinorUnits(params.expectedAmount, params.expectedCurrency);
+
+  if (params.provider === 'konnect') {
+    if (!secrets.apiKey) return { ok: false, status: 'failed', reason: 'Missing Konnect API key', statusCode: 503 };
+    const baseUrl =
+      cfg.methods.online_payment.mode === 'live'
+        ? `https://api.konnect.network/api/v2/payments/${encodeURIComponent(params.payRef)}`
+        : `https://api.sandbox.konnect.network/api/v2/payments/${encodeURIComponent(params.payRef)}`;
+    try {
+      const checkRes = await fetch(baseUrl, {
+        headers: { 'x-api-key': secrets.apiKey },
+        signal: AbortSignal.timeout(10000),
+      });
+      const checkJson: any = await checkRes.json().catch(() => ({}));
+      if (!checkRes.ok || !checkJson?.payment) {
+        return { ok: false, status: 'failed', reason: `Konnect returned HTTP ${checkRes.status}`, statusCode: 502 };
+      }
+      const pStatus = String(checkJson.payment.status || '').toLowerCase();
+      const paidAmount = Number(checkJson.payment.amount);
+      const paidToken = String(checkJson.payment.token || params.expectedCurrency).toUpperCase();
+
+      if (paidToken !== String(params.expectedCurrency).toUpperCase()) {
+        return { ok: false, status: 'failed', reason: `Currency mismatch (${paidToken} != ${params.expectedCurrency})`, statusCode: 403 };
+      }
+      if (Number.isFinite(paidAmount) && Math.abs(paidAmount - expectedMinor) > 1) {
+        return {
+          ok: false,
+          status: 'failed',
+          reason: `Amount tamper mismatch (${paidAmount} != ${expectedMinor})`,
+          statusCode: 403,
+        };
+      }
+      if (pStatus === 'completed' || pStatus === 'paid') {
+        return { ok: true, status: 'completed' };
+      }
+      if (pStatus === 'pending') {
+        return { ok: true, status: 'pending' };
+      }
+      return { ok: true, status: 'failed', reason: `Konnect status=${pStatus}` };
+    } catch {
+      return { ok: false, status: 'failed', reason: 'Failed to reach Konnect verification API', statusCode: 502 };
+    }
+  }
+
+  if (params.provider === 'flouci') {
+    if (!secrets.apiKey || !secrets.walletId) {
+      return { ok: false, status: 'failed', reason: 'Missing Flouci credentials', statusCode: 503 };
+    }
+    try {
+      const checkRes = await fetch(`https://developers.flouci.com/api/verify_payment/${encodeURIComponent(params.payRef)}`, {
+        method: 'GET',
+        headers: {
+          apppublic: secrets.apiKey,
+          appsecret: secrets.walletId,
+        },
+        signal: AbortSignal.timeout(10000),
+      });
+      const checkJson: any = await checkRes.json().catch(() => ({}));
+      const result = checkJson?.result;
+      if (!checkRes.ok || !result) {
+        return { ok: false, status: 'failed', reason: `Flouci returned HTTP ${checkRes.status}`, statusCode: 502 };
+      }
+      const fStatus = String(result.status || '').toUpperCase();
+      if (fStatus === 'SUCCESS') {
+        if (typeof result.amount === 'number' && Math.abs(result.amount - expectedMinor) > 1) {
+          return {
+            ok: false,
+            status: 'failed',
+            reason: `Flouci amount tamper mismatch (${result.amount} != ${expectedMinor})`,
+            statusCode: 403,
+          };
+        }
+        return { ok: true, status: 'completed' };
+      }
+      if (fStatus === 'PENDING' || fStatus === 'CREATED') {
+        return { ok: true, status: 'pending' };
+      }
+      return { ok: true, status: 'failed', reason: `Flouci status=${fStatus}` };
+    } catch {
+      return { ok: false, status: 'failed', reason: 'Failed to reach Flouci verification API', statusCode: 502 };
+    }
+  }
+
+  return { ok: false, status: 'failed', reason: 'Unsupported provider verification', statusCode: 400 };
 }
 
 export interface ServerCheckoutInput {
@@ -629,6 +998,8 @@ export interface ServerCheckoutInput {
   carrierName?: string;
   notes?: string;
   transferProof?: Partial<TransferProof>;
+  origin?: string;
+  clientRequestId?: string;
 }
 
 export async function processServerCheckout(input: ServerCheckoutInput): Promise<{
@@ -644,6 +1015,35 @@ export async function processServerCheckout(input: ServerCheckoutInput): Promise
   }
   if (!input.customerName?.trim() || !input.customerPhone?.trim() || !input.shippingAddress?.street?.trim()) {
     return { ok: false, statusCode: 400, error: 'يرجى إكمال بيانات المستلم وعنوان التوصيل.' };
+  }
+  const phoneDigits = (input.customerPhone || '').replace(/\D/g, '');
+  if (phoneDigits.length < 6 || phoneDigits.length > 15) {
+    return { ok: false, statusCode: 400, error: 'يرجى إدخال رقم هاتف صحيح (بين 6 و15 رقماً).' };
+  }
+  if (input.customerEmail && input.customerEmail.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.customerEmail.trim())) {
+    return { ok: false, statusCode: 400, error: 'صيغة البريد الإلكتروني غير صحيحة.' };
+  }
+
+  // Idempotency replay protection against double-clicks
+  const reqKey = (input.clientRequestId || '').trim();
+  if (reqKey && reqKey.length >= 8) {
+    const nowMs = Date.now();
+    paymentDb.recentCheckoutRequests = (paymentDb.recentCheckoutRequests || []).filter(
+      (r) => nowMs - r.createdAt < 10 * 60 * 1000
+    );
+    const existingReq = paymentDb.recentCheckoutRequests.find((r) => r.key === reqKey);
+    if (existingReq) {
+      const existingOrder = paymentDb.orders.find((o) => o.id === existingReq.orderId);
+      const existingTxn = paymentDb.transactions.find((t) => t.orderId === existingReq.orderId);
+      if (existingOrder && existingTxn) {
+        return {
+          ok: true,
+          order: existingOrder,
+          transaction: existingTxn,
+          paymentUrl: existingReq.paymentUrl,
+        };
+      }
+    }
   }
 
   const normalizedMethod = normalizePaymentMethod(input.paymentMethod);
@@ -809,12 +1209,16 @@ export async function processServerCheckout(input: ServerCheckoutInput): Promise
 
   if (normalizedMethod === 'bank_transfer') {
     if (input.transferProof && input.transferProof.referenceNumber?.trim()) {
+      const cleanImg = sanitizeReceiptImageDataUrl(input.transferProof.receiptImageDataUrl);
+      if (!cleanImg.ok) {
+        return { ok: false, statusCode: 400, error: cleanImg.error };
+      }
       initialPaymentStatus = 'Payment Verification';
       submittedProof = {
         referenceNumber: input.transferProof.referenceNumber.trim(),
         senderName: (input.transferProof.senderName || input.customerName).trim(),
         transferDate: input.transferProof.transferDate || now.split('T')[0],
-        receiptImageDataUrl: input.transferProof.receiptImageDataUrl,
+        receiptImageDataUrl: cleanImg.value,
         notes: input.transferProof.notes?.trim(),
         submittedAt: now,
       };
@@ -830,64 +1234,25 @@ export async function processServerCheckout(input: ServerCheckoutInput): Promise
   let paymentUrl: string | undefined;
 
   if (normalizedMethod === 'online_payment') {
-    if (cfg.methods.online_payment.provider === 'konnect') {
-      const endpoint =
-        cfg.methods.online_payment.mode === 'live'
-          ? 'https://api.konnect.network/api/v2/payments/init-payment'
-          : 'https://api.sandbox.konnect.network/api/v2/payments/init-payment';
-      try {
-        const initRes = await fetch(endpoint, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-api-key': cfg.secrets.apiKey,
-          },
-          body: JSON.stringify({
-            receiverWalletId: cfg.secrets.walletId,
-            token: cfg.currency,
-            amount: cfg.currency === 'TND' ? Math.round(totalAmount * 1000) : Math.round(totalAmount * 100),
-            type: 'immediate',
-            description: `ECHOX Store Order ${trackingNumber}`,
-            acceptedPaymentMethods: ['wallet', 'bank_card', 'e-DINAR'],
-            orderId: trackingNumber,
-            firstName: input.customerName.trim(),
-            phoneNumber: input.customerPhone.trim(),
-            email: input.customerEmail?.trim() || undefined,
-            silentWebhook: true,
-          }),
-        });
-        const initJson: any = await initRes.json().catch(() => ({}));
-        if (!initRes.ok || !initJson?.payUrl) {
-          appendActivity(
-            'ONLINE_GATEWAY_INIT_FAILED',
-            'system',
-            `Konnect init failed for ${trackingNumber}: HTTP ${initRes.status} ${JSON.stringify(initJson)}`
-          );
-          saveDatabase(paymentDb);
-          return {
-            ok: false,
-            statusCode: 502,
-            error: initJson?.message || 'فشل إنشاء جلسة الدفع الإلكتروني مع المزود. يرجى التحقق من بيانات البوابة أو استخدام الدفع عند الاستلام / التحويل البنكي.',
-          };
-        }
-        externalPaymentId = initJson.paymentRef;
-        paymentUrl = initJson.payUrl;
-      } catch (err: any) {
-        appendActivity('ONLINE_GATEWAY_NETWORK_ERROR', 'system', `Konnect init network failure: ${err?.message}`);
-        saveDatabase(paymentDb);
-        return {
-          ok: false,
-          statusCode: 502,
-          error: 'تعذر الاتصال ببوابة الدفع الإلكتروني حالياً. يرجى استخدام الدفع عند الاستلام أو التحويل البنكي.',
-        };
-      }
-    } else {
+    const gatewayInit = await initiateGatewaySession({
+      amount: totalAmount,
+      currency: cfg.currency,
+      trackingRef: trackingNumber,
+      description: `ECHOX Store Order ${trackingNumber}`,
+      customerName: input.customerName,
+      customerPhone: input.customerPhone,
+      customerEmail: input.customerEmail,
+      origin: input.origin,
+    });
+    if (!gatewayInit.ok) {
       return {
         ok: false,
-        statusCode: 400,
-        error: 'مزود الدفع المختار غير مكتمل التفعيل على الخادم.',
+        statusCode: gatewayInit.statusCode || 502,
+        error: gatewayInit.error,
       };
     }
+    externalPaymentId = gatewayInit.externalPaymentId;
+    paymentUrl = gatewayInit.paymentUrl;
   }
 
   const order: Order = {
@@ -970,6 +1335,12 @@ export async function processServerCheckout(input: ServerCheckoutInput): Promise
   paymentDb.orders = [order, ...paymentDb.orders];
   paymentDb.transactions = [transaction, ...paymentDb.transactions];
   paymentDb.vendorLedgers = [...ledgerEntries, ...paymentDb.vendorLedgers];
+  if (reqKey && reqKey.length >= 8) {
+    paymentDb.recentCheckoutRequests = [
+      { key: reqKey, orderId, paymentUrl, createdAt: Date.now() },
+      ...(paymentDb.recentCheckoutRequests || []).slice(0, 99),
+    ];
+  }
   appendActivity(
     'ORDER_PAYMENT_CREATED',
     'customer',
@@ -1014,12 +1385,17 @@ export function submitBankTransferProof(payload: {
     return { ok: false, statusCode: 400, error: 'يرجى إدخال رقم العملية البنكية واسم المحوّل.' };
   }
 
+  const cleanImg = sanitizeReceiptImageDataUrl(payload.receiptImageDataUrl);
+  if (!cleanImg.ok) {
+    return { ok: false, statusCode: 400, error: cleanImg.error };
+  }
+
   const now = new Date().toISOString();
   const proof: TransferProof = {
     referenceNumber: payload.referenceNumber.trim(),
     senderName: payload.senderName.trim(),
     transferDate: payload.transferDate || now.split('T')[0],
-    receiptImageDataUrl: payload.receiptImageDataUrl,
+    receiptImageDataUrl: cleanImg.value,
     notes: payload.notes?.trim(),
     submittedAt: now,
   };
@@ -1075,8 +1451,8 @@ export function adminVerifyPayment(payload: {
   const nextStatus: PaymentStatus = payload.action === 'approve' ? 'Paid' : 'Payment Failed';
 
   if (order) {
-    if (order.paymentStatus === 'Refunded') {
-      return { ok: false, statusCode: 400, error: 'لا يمكن اعتماد معاملة مسترجعة مسبقاً.' };
+    if (order.paymentStatus === 'Refunded' || order.paymentStatus === 'Cancelled' || order.status === 'cancelled') {
+      return { ok: false, statusCode: 400, error: 'لا يمكن اعتماد أو تعديل معاملة لطلب ملغى أو مسترجع مسبقاً.' };
     }
     order.paymentStatus = nextStatus;
     order.updatedAt = now;
@@ -1089,6 +1465,9 @@ export function adminVerifyPayment(payload: {
   }
 
   if (txn) {
+    if (txn.status === 'Refunded' || txn.status === 'Cancelled') {
+      return { ok: false, statusCode: 400, error: 'لا يمكن تعديل معاملة ملغاة أو مسترجعة.' };
+    }
     txn.status = nextStatus;
     txn.failureReason = payload.action === 'reject' ? (payload.reason || 'Rejected by Admin') : undefined;
     txn.verifiedByAdmin = payload.adminEmail || 'Admin Panel';
@@ -1142,6 +1521,12 @@ export function adminProcessRefundOrCancel(payload: {
   }
 
   const isRefund = payload.action === 'refund';
+  if (isRefund && order.paymentStatus === 'Refunded') {
+    return { ok: false, statusCode: 400, error: 'تم استرجاع مبلغ هذا الطلب مسبقاً.' };
+  }
+  if (!isRefund && order.paymentStatus === 'Cancelled' && order.status === 'cancelled') {
+    return { ok: false, statusCode: 400, error: 'هذا الطلب ملغى مسبقاً.' };
+  }
   const nextPayStatus: PaymentStatus = isRefund ? 'Refunded' : 'Cancelled';
 
   order.paymentStatus = nextPayStatus;
@@ -1264,6 +1649,14 @@ export function adminUpdateOrderStatus(orderId: string, status: OrderStatus, not
     return { ok: false, statusCode: 404, error: 'الطلب غير موجود.' };
   }
 
+  if (order.status === 'cancelled' && status !== 'cancelled') {
+    return {
+      ok: false,
+      statusCode: 409,
+      error: 'لا يمكن شحن أو تفعيل طلب ملغى مالياً.',
+    };
+  }
+
   const shippingStatuses: OrderStatus[] = ['preparing', 'out_for_delivery', 'delivered'];
   if (shippingStatuses.includes(status) && !canOrderShip(order)) {
     return {
@@ -1280,6 +1673,43 @@ export function adminUpdateOrderStatus(orderId: string, status: OrderStatus, not
     ...order.statusHistory,
     { status, timestamp: now, note: note || `Updated shipping status to ${status}` },
   ];
+
+  // Logical COD lifecycle settlement: once COD parcel is delivered, mark payment Paid & unlock vendor earnings
+  if (
+    status === 'delivered' &&
+    normalizePaymentMethod(order.paymentMethod) === 'cod' &&
+    order.paymentStatus !== 'Paid' &&
+    order.paymentStatus !== 'paid' &&
+    order.paymentStatus !== 'Refunded' &&
+    order.paymentStatus !== 'Cancelled'
+  ) {
+    order.paymentStatus = 'Paid';
+    const txn = paymentDb.transactions.find(t => t.orderId === order.id);
+    if (txn) {
+      txn.status = 'Paid';
+      txn.verifiedByAdmin = 'COD Auto-Settlement on Delivery';
+      txn.verifiedAt = now;
+      txn.updatedAt = now;
+    }
+    if (order.subOrders) {
+      order.subOrders.forEach(sub => {
+        if (sub.payoutStatus === 'pending') sub.payoutStatus = 'eligible';
+        sub.updatedAt = now;
+      });
+    }
+    paymentDb.vendorLedgers.forEach(entry => {
+      if (entry.orderId === order.id && entry.payoutStatus === 'pending') {
+        entry.paymentStatus = 'Paid';
+        entry.payoutStatus = 'eligible';
+        entry.updatedAt = now;
+      } else if (entry.orderId === order.id) {
+        entry.paymentStatus = 'Paid';
+        entry.updatedAt = now;
+      }
+    });
+    appendActivity('COD_COLLECTED_ON_DELIVERY', 'system', `Marked COD order ${order.trackingNumber} Paid upon delivery and unlocked vendor balances.`, order.id, order.totalAmount);
+  }
+
   appendActivity('ORDER_STATUS_UPDATED', 'admin', `Order ${order.trackingNumber} transitioned to "${status}".`, order.id);
   saveDatabase(paymentDb);
   return { ok: true, order };
@@ -1538,28 +1968,87 @@ export function getAdminPaymentOverview() {
   };
 }
 
+function markOrderPaymentFromGateway(txn: PaymentTransaction, nextStatus: PaymentStatus, sourceTag: string, failureReason?: string): Order | undefined {
+  const now = new Date().toISOString();
+  // Terminal / Paid immutability guard: never downgrade already Paid, Refunded, or Cancelled records
+  if (txn.status === 'Refunded' || txn.status === 'Cancelled') return paymentDb.orders.find(o => o.id === txn.orderId);
+  if (txn.status === 'Paid' && nextStatus !== 'Paid') return paymentDb.orders.find(o => o.id === txn.orderId);
+
+  txn.status = nextStatus;
+  txn.failureReason = nextStatus === 'Payment Failed' ? failureReason : undefined;
+  txn.updatedAt = now;
+
+  const order = paymentDb.orders.find(o => o.id === txn.orderId);
+  if (order && order.paymentStatus !== 'Refunded' && order.paymentStatus !== 'Cancelled') {
+    if (!(order.paymentStatus === 'Paid' && nextStatus !== 'Paid')) {
+      order.paymentStatus = nextStatus;
+      order.updatedAt = now;
+      if (nextStatus === 'Paid') {
+        order.statusHistory = [
+          ...order.statusHistory,
+          { status: order.status, timestamp: now, note: `تم تأكيد الدفع الإلكتروني تلقائياً (${sourceTag})` },
+        ];
+      }
+      if (order.subOrders) {
+        order.subOrders.forEach(s => {
+          s.payoutStatus = nextStatus === 'Paid' ? 'eligible' : 'pending';
+          s.updatedAt = now;
+        });
+      }
+    }
+  }
+
+  paymentDb.vendorLedgers.forEach(entry => {
+    if (entry.orderId === txn.orderId) {
+      if (!(entry.paymentStatus === 'Paid' && nextStatus !== 'Paid')) {
+        entry.paymentStatus = nextStatus;
+        entry.payoutStatus = nextStatus === 'Paid' ? 'eligible' : 'pending';
+        entry.updatedAt = now;
+      }
+    }
+  });
+
+  return order;
+}
+
 export async function handlePaymentWebhook(payload: {
   provider: string;
+  method?: 'GET' | 'POST';
   signatureHeader?: string;
   rawBody: any;
+  rawBodyText?: string;
+  query?: Record<string, any>;
 }): Promise<{ ok: boolean; statusCode: number; message: string; idempotentDuplicate?: boolean }> {
-  const { provider, signatureHeader, rawBody } = payload;
+  const { provider, method = 'POST', signatureHeader, rawBody, rawBodyText, query } = payload;
   const secrets = paymentDb.config.secrets;
+  const mergedInput = {
+    ...(query || {}),
+    ...(rawBody && typeof rawBody === 'object' ? rawBody : {}),
+  };
 
-  // Enforce secret verification if webhookSecret is configured OR query official provider API
-  if (secrets.webhookSecret && secrets.webhookSecret.trim().length > 0) {
+  // Konnect silentWebhook uses GET ?payment_ref=... and does not carry an HMAC header;
+  // security relies on server-to-server Konnect API verification. For POST webhooks with webhookSecret, verify raw HMAC bytes.
+  const isSilentKonnectGet = method === 'GET' && provider === 'konnect' && Boolean(mergedInput.payment_ref);
+
+  if (!isSilentKonnectGet && secrets.webhookSecret && secrets.webhookSecret.trim().length > 0) {
     if (!signatureHeader) {
       appendActivity('WEBHOOK_UNAUTHORIZED', 'webhook', `Rejected ${provider} webhook missing signature header.`);
       saveDatabase(paymentDb);
       return { ok: false, statusCode: 401, message: 'Missing webhook signature header.' };
     }
-    const serialized = typeof rawBody === 'string' ? rawBody : JSON.stringify(rawBody || {});
+    const cleanSig = signatureHeader.trim().replace(/^sha256=/i, '');
+    const wireText =
+      typeof rawBodyText === 'string' && rawBodyText.length > 0
+        ? rawBodyText
+        : typeof rawBody === 'string'
+        ? rawBody
+        : JSON.stringify(rawBody || {});
     const expectedHmac = crypto
-      .createHmac('sha256', secrets.webhookSecret)
-      .update(serialized)
+      .createHmac('sha256', secrets.webhookSecret.trim())
+      .update(wireText)
       .digest('hex');
 
-    const sigBuf = Buffer.from(signatureHeader.trim());
+    const sigBuf = Buffer.from(cleanSig);
     const expBuf = Buffer.from(expectedHmac);
     if (sigBuf.length !== expBuf.length || !crypto.timingSafeEqual(sigBuf, expBuf)) {
       appendActivity('WEBHOOK_SIGNATURE_INVALID', 'webhook', `Rejected ${provider} webhook with invalid HMAC signature.`);
@@ -1572,80 +2061,93 @@ export async function handlePaymentWebhook(payload: {
     return { ok: false, statusCode: 503, message: 'Gateway not configured on server.' };
   }
 
+  const payRefParam = mergedInput?.payment_ref || mergedInput?.paymentRef || mergedInput?.payment_id || '';
+  const trackingOrRef = mergedInput?.orderId || mergedInput?.trackingNumber || mergedInput?.developer_tracking_id || payRefParam;
+  if (!trackingOrRef) {
+    return { ok: false, statusCode: 400, message: 'Missing payment or order identifier in webhook payload.' };
+  }
+
   const eventId =
-    rawBody?.eventId ||
-    rawBody?.id ||
-    `${provider}:${rawBody?.payment_ref || rawBody?.paymentRef || rawBody?.orderId || ''}:${rawBody?.status || ''}`;
+    mergedInput?.eventId ||
+    mergedInput?.id ||
+    `${provider}:${payRefParam || trackingOrRef}:${mergedInput?.status || method}`;
 
   if (eventId && paymentDb.processedWebhookKeys.includes(eventId)) {
     return { ok: true, statusCode: 200, message: 'Duplicate webhook safely ignored (idempotent).', idempotentDuplicate: true };
   }
 
-  const trackingOrRef = rawBody?.orderId || rawBody?.trackingNumber || rawBody?.payment_ref || rawBody?.paymentRef;
-  if (!trackingOrRef) {
-    return { ok: false, statusCode: 400, message: 'Missing payment or order identifier in webhook payload.' };
-  }
-
+  // Locate either an Order PaymentTransaction OR an independent SupportTransaction
   const txn = paymentDb.transactions.find(
-    t => t.trackingNumber === trackingOrRef || t.externalPaymentId === trackingOrRef || t.paymentReference === trackingOrRef
+    t => t.trackingNumber === trackingOrRef || t.externalPaymentId === trackingOrRef || t.paymentReference === trackingOrRef || (payRefParam && t.externalPaymentId === payRefParam)
   );
-  if (!txn) {
+  const supTxn = !txn
+    ? paymentDb.supportTransactions.find(
+        s => s.supportReference === trackingOrRef || s.externalPaymentId === trackingOrRef || (payRefParam && s.externalPaymentId === payRefParam)
+      )
+    : undefined;
+
+  if (!txn && !supTxn) {
     return { ok: false, statusCode: 404, message: 'Transaction not found.' };
   }
 
-  // When Konnect provider is used and apiKey exists, perform authoritative server-side verification lookup
-  let verifiedStatus: 'completed' | 'failed' = 'failed';
-  if (provider === 'konnect' && secrets.apiKey && (txn.externalPaymentId || rawBody?.payment_ref)) {
-    const payRef = txn.externalPaymentId || rawBody.payment_ref;
-    const baseUrl =
-      paymentDb.config.methods.online_payment.mode === 'live'
-        ? `https://api.konnect.network/api/v2/payments/${encodeURIComponent(payRef)}`
-        : `https://api.sandbox.konnect.network/api/v2/payments/${encodeURIComponent(payRef)}`;
-    try {
-      const checkRes = await fetch(baseUrl, {
-        headers: { 'x-api-key': secrets.apiKey },
-      });
-      const checkJson: any = await checkRes.json().catch(() => ({}));
-      const pStatus = checkJson?.payment?.status;
-      if (checkRes.ok && (pStatus === 'completed' || pStatus === 'paid')) {
-        verifiedStatus = 'completed';
-      } else {
-        verifiedStatus = 'failed';
+  const targetAmount = txn ? txn.amount : supTxn!.amount;
+  const targetCurrency = txn ? txn.currency : supTxn!.currency;
+  const targetExternalRef = (txn?.externalPaymentId || supTxn?.externalPaymentId || payRefParam || '').trim();
+
+  // Prevent paymentRef swap attack
+  if (
+    payRefParam &&
+    (txn?.externalPaymentId || supTxn?.externalPaymentId) &&
+    payRefParam !== (txn?.externalPaymentId || supTxn?.externalPaymentId)
+  ) {
+    appendActivity('TAMPER_WEBHOOK_REF_MISMATCH', 'webhook', `Rejected mismatched payment_ref (${payRefParam}) on ${trackingOrRef}.`);
+    saveDatabase(paymentDb);
+    return { ok: false, statusCode: 403, message: 'Payment reference mismatch.' };
+  }
+
+  let verifiedStatus: 'completed' | 'pending' | 'failed' = 'failed';
+
+  if ((provider === 'konnect' || provider === 'flouci') && targetExternalRef) {
+    const check = await verifyGatewayPaymentRef({
+      provider,
+      payRef: targetExternalRef,
+      expectedAmount: targetAmount,
+      expectedCurrency: targetCurrency,
+    });
+    if (!check.ok) {
+      if (check.statusCode === 403) {
+        appendActivity('TAMPER_WEBHOOK_AMOUNT_MISMATCH', 'webhook', `${provider} security violation on ${trackingOrRef}: ${check.reason}`);
+        saveDatabase(paymentDb);
+        return { ok: false, statusCode: 403, message: check.reason || 'Payment integrity verification failed.' };
       }
-    } catch {
-      return { ok: false, statusCode: 502, message: 'Failed to verify payment with Konnect server API.' };
+      return { ok: false, statusCode: check.statusCode || 502, message: check.reason || 'Gateway verification error.' };
     }
+    verifiedStatus = check.status;
   } else if (secrets.webhookSecret) {
-    const incomingStatus = String(rawBody?.status || '').toLowerCase();
-    verifiedStatus = incomingStatus === 'completed' || incomingStatus === 'paid' || incomingStatus === 'succeeded'
-      ? 'completed'
-      : 'failed';
+    const incomingStatus = String(mergedInput?.status || '').toLowerCase();
+    verifiedStatus =
+      incomingStatus === 'completed' || incomingStatus === 'paid' || incomingStatus === 'succeeded' || incomingStatus === 'success'
+        ? 'completed'
+        : incomingStatus === 'pending'
+        ? 'pending'
+        : 'failed';
   }
 
-  const now = new Date().toISOString();
+  if (verifiedStatus === 'pending') {
+    return { ok: true, statusCode: 200, message: 'Payment is still pending confirmation.' };
+  }
+
   const nextStatus: PaymentStatus = verifiedStatus === 'completed' ? 'Paid' : 'Payment Failed';
-  txn.status = nextStatus;
-  txn.updatedAt = now;
+  const targetRefLabel = txn ? txn.trackingNumber : supTxn!.supportReference;
 
-  const order = paymentDb.orders.find(o => o.id === txn.orderId);
-  if (order) {
-    order.paymentStatus = nextStatus;
-    order.updatedAt = now;
-    if (order.subOrders) {
-      order.subOrders.forEach(s => {
-        s.payoutStatus = verifiedStatus === 'completed' ? 'eligible' : 'pending';
-        s.updatedAt = now;
-      });
+  if (txn) {
+    markOrderPaymentFromGateway(txn, nextStatus, `${provider} webhook`);
+  } else if (supTxn) {
+    if (supTxn.status !== 'Refunded' && supTxn.status !== 'Cancelled' && !(supTxn.status === 'Paid' && nextStatus !== 'Paid')) {
+      supTxn.status = nextStatus;
+      supTxn.updatedAt = new Date().toISOString();
     }
   }
-
-  paymentDb.vendorLedgers.forEach(entry => {
-    if (entry.orderId === txn.orderId) {
-      entry.paymentStatus = nextStatus;
-      entry.payoutStatus = verifiedStatus === 'completed' ? 'eligible' : 'pending';
-      entry.updatedAt = now;
-    }
-  });
 
   if (eventId) {
     paymentDb.processedWebhookKeys = [eventId, ...paymentDb.processedWebhookKeys].slice(0, 500);
@@ -1654,18 +2156,109 @@ export async function handlePaymentWebhook(payload: {
   appendActivity(
     'WEBHOOK_PROCESSED',
     'webhook',
-    `${provider} webhook updated ${txn.trackingNumber} to ${nextStatus}.`,
-    txn.orderId,
-    txn.amount
+    `${provider} webhook updated ${targetRefLabel} to ${nextStatus}.`,
+    txn ? txn.orderId : supTxn!.id,
+    targetAmount
   );
   saveDatabase(paymentDb);
   return { ok: true, statusCode: 200, message: `Webhook processed: ${nextStatus}` };
 }
 
+export async function verifyGatewayReturn(params: {
+  tracking?: string;
+  paymentRef?: string;
+  provider?: string;
+}): Promise<{
+  ok: boolean;
+  statusCode?: number;
+  kind?: 'order' | 'support';
+  paymentStatus?: PaymentStatus;
+  order?: Order;
+  supportTransaction?: SupportTransaction;
+  error?: string;
+}> {
+  const cleanTrack = (params.tracking || '').trim().toUpperCase();
+  const cleanPayRef = (params.paymentRef || '').trim();
+
+  const txn = paymentDb.transactions.find(
+    t =>
+      (cleanTrack && (t.trackingNumber.toUpperCase() === cleanTrack || t.paymentReference.toUpperCase() === cleanTrack)) ||
+      (cleanPayRef && t.externalPaymentId === cleanPayRef)
+  );
+  const supTxn = !txn
+    ? paymentDb.supportTransactions.find(
+        s =>
+          (cleanTrack && s.supportReference.toUpperCase() === cleanTrack) ||
+          (cleanPayRef && s.externalPaymentId === cleanPayRef)
+      )
+    : undefined;
+
+  if (!txn && !supTxn) {
+    return { ok: false, statusCode: 404, error: 'لم يتم العثور على المعاملة للتحقق منها.' };
+  }
+
+  const targetStatus = txn ? txn.status : supTxn!.status;
+  const targetProvider = (params.provider || txn?.provider || supTxn?.provider || paymentDb.config.methods.online_payment.provider || 'konnect').toLowerCase();
+  const extRef = txn?.externalPaymentId || supTxn?.externalPaymentId || cleanPayRef;
+
+  if (targetStatus === 'Paid') {
+    return {
+      ok: true,
+      kind: txn ? 'order' : 'support',
+      paymentStatus: 'Paid',
+      order: txn ? paymentDb.orders.find(o => o.id === txn.orderId) : undefined,
+      supportTransaction: supTxn,
+    };
+  }
+
+  if ((targetProvider === 'konnect' || targetProvider === 'flouci') && extRef) {
+    const check = await verifyGatewayPaymentRef({
+      provider: targetProvider,
+      payRef: extRef,
+      expectedAmount: txn ? txn.amount : supTxn!.amount,
+      expectedCurrency: txn ? txn.currency : supTxn!.currency,
+    });
+    if (check.ok && check.status === 'completed') {
+      if (txn) {
+        const order = markOrderPaymentFromGateway(txn, 'Paid', `${targetProvider} return verify`);
+        appendActivity('GATEWAY_RETURN_VERIFIED_PAID', 'system', `Verified ${txn.trackingNumber} as Paid on return.`, txn.orderId, txn.amount);
+        saveDatabase(paymentDb);
+        return { ok: true, kind: 'order', paymentStatus: 'Paid', order };
+      } else if (supTxn) {
+        supTxn.status = 'Paid';
+        supTxn.updatedAt = new Date().toISOString();
+        appendActivity('SUPPORT_RETURN_VERIFIED_PAID', 'system', `Verified support ${supTxn.supportReference} as Paid on return.`, supTxn.id, supTxn.amount);
+        saveDatabase(paymentDb);
+        return { ok: true, kind: 'support', paymentStatus: 'Paid', supportTransaction: supTxn };
+      }
+    }
+    if (check.ok && check.status === 'failed') {
+      if (txn) {
+        const order = markOrderPaymentFromGateway(txn, 'Payment Failed', `${targetProvider} return verify`, check.reason);
+        saveDatabase(paymentDb);
+        return { ok: true, kind: 'order', paymentStatus: 'Payment Failed', order };
+      } else if (supTxn) {
+        supTxn.status = 'Payment Failed';
+        supTxn.updatedAt = new Date().toISOString();
+        saveDatabase(paymentDb);
+        return { ok: true, kind: 'support', paymentStatus: 'Payment Failed', supportTransaction: supTxn };
+      }
+    }
+  }
+
+  return {
+    ok: true,
+    kind: txn ? 'order' : 'support',
+    paymentStatus: targetStatus,
+    order: txn ? paymentDb.orders.find(o => o.id === txn.orderId) : undefined,
+    supportTransaction: supTxn,
+  };
+}
+
 // ==========================================
 // INDEPENDENT SUPPORT ECHOX ENGINE
 // ==========================================
-export function createSupportContribution(payload: {
+export async function createSupportContribution(payload: {
   amount: number;
   method: PaymentMethodType;
   supporterName?: string;
@@ -1673,10 +2266,11 @@ export function createSupportContribution(payload: {
   supporterEmail?: string;
   note?: string;
   transferProof?: Partial<TransferProof>;
-}): { ok: boolean; statusCode?: number; error?: string; supportTransaction?: SupportTransaction } {
+  origin?: string;
+}): Promise<{ ok: boolean; statusCode?: number; error?: string; supportTransaction?: SupportTransaction; paymentUrl?: string }> {
   const amt = round3(Number(payload.amount));
-  if (!Number.isFinite(amt) || amt <= 0) {
-    return { ok: false, statusCode: 400, error: 'يرجى إدخال مبلغ دعم صالح أكبر من صفر.' };
+  if (!Number.isFinite(amt) || amt <= 0 || amt > 50000) {
+    return { ok: false, statusCode: 400, error: 'يرجى إدخال مبلغ دعم صالح (بين 0.5 و 50,000).' };
   }
 
   const method = normalizePaymentMethod(payload.method);
@@ -1701,12 +2295,16 @@ export function createSupportContribution(payload: {
 
   if (method === 'bank_transfer') {
     if (payload.transferProof?.referenceNumber?.trim()) {
+      const cleanImg = sanitizeReceiptImageDataUrl(payload.transferProof.receiptImageDataUrl);
+      if (!cleanImg.ok) {
+        return { ok: false, statusCode: 400, error: cleanImg.error };
+      }
       initialStatus = 'Payment Verification';
       proof = {
         referenceNumber: payload.transferProof.referenceNumber.trim(),
         senderName: (payload.transferProof.senderName || payload.supporterName || 'داعم ECHOX').trim(),
         transferDate: payload.transferProof.transferDate || now.split('T')[0],
-        receiptImageDataUrl: payload.transferProof.receiptImageDataUrl,
+        receiptImageDataUrl: cleanImg.value,
         notes: payload.transferProof.notes?.trim(),
         submittedAt: now,
       };
@@ -1715,6 +2313,29 @@ export function createSupportContribution(payload: {
     }
   } else if (method === 'online_payment') {
     initialStatus = 'Pending Payment';
+  }
+
+  let paymentUrl: string | undefined;
+  let externalPaymentId: string | undefined;
+  let provider: string | undefined;
+
+  if (method === 'online_payment') {
+    const gatewayInit = await initiateGatewaySession({
+      amount: amt,
+      currency: cfg.currency,
+      trackingRef: supportRef,
+      description: `ECHOX Platform Support ${supportRef}`,
+      customerName: payload.supporterName?.trim() || 'ECHOX Supporter',
+      customerPhone: payload.supporterPhone?.trim() || '00000000',
+      customerEmail: payload.supporterEmail,
+      origin: payload.origin,
+    });
+    if (!gatewayInit.ok) {
+      return { ok: false, statusCode: gatewayInit.statusCode || 502, error: gatewayInit.error };
+    }
+    paymentUrl = gatewayInit.paymentUrl;
+    externalPaymentId = gatewayInit.externalPaymentId;
+    provider = gatewayInit.provider;
   }
 
   const supTxn: SupportTransaction = {
@@ -1727,6 +2348,8 @@ export function createSupportContribution(payload: {
     amount: amt,
     currency: cfg.currency,
     method,
+    provider,
+    externalPaymentId,
     status: initialStatus,
     transferProof: proof,
     createdAt: now,
@@ -1743,7 +2366,7 @@ export function createSupportContribution(payload: {
   );
   saveDatabase(paymentDb);
 
-  return { ok: true, supportTransaction: supTxn };
+  return { ok: true, supportTransaction: supTxn, paymentUrl };
 }
 
 export function adminVerifySupportTransaction(id: string, action: 'approve' | 'reject'): {
@@ -1755,6 +2378,9 @@ export function adminVerifySupportTransaction(id: string, action: 'approve' | 'r
   const sup = paymentDb.supportTransactions.find(s => s.id === id || s.supportReference === id);
   if (!sup) {
     return { ok: false, statusCode: 404, error: 'معاملة الدعم غير موجودة.' };
+  }
+  if (sup.status === 'Refunded' || sup.status === 'Cancelled') {
+    return { ok: false, statusCode: 400, error: 'لا يمكن تعديل معاملة دعم ملغاة أو مسترجعة.' };
   }
   const now = new Date().toISOString();
   sup.status = action === 'approve' ? 'Paid' : 'Payment Failed';

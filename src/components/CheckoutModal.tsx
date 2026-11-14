@@ -64,6 +64,9 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({ isOpen, onClose })
   };
 
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethodType>(getFirstAvailableMethod);
+  const [clientRequestId, setClientRequestId] = useState<string>(
+    () => `chk_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+  );
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [completedOrder, setCompletedOrder] = useState<Order | null>(null);
@@ -83,8 +86,17 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({ isOpen, onClose })
     if (isOpen) {
       refreshPaymentConfig();
       setErrorMsg('');
+      if (!completedOrder) {
+        setClientRequestId(`chk_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`);
+      }
     }
   }, [isOpen]);
+
+  useEffect(() => {
+    if (!completedOrder) {
+      setClientRequestId(`chk_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`);
+    }
+  }, [cart.length, paymentMethod]);
 
   useEffect(() => {
     if (paymentMethod === 'cod' && !codEnabled) setPaymentMethod(getFirstAvailableMethod());
@@ -108,6 +120,14 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({ isOpen, onClose })
   const handleProofFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (!file.type.startsWith('image/') || file.type.includes('svg')) {
+      setErrorMsg(
+        language === 'ar'
+          ? 'يرجى رفع صورة وصل صالحة (PNG / JPG / WEBP فقط).'
+          : 'Please upload a valid receipt image (PNG / JPG / WEBP only).'
+      );
+      return;
+    }
     if (file.size > 3 * 1024 * 1024) {
       setErrorMsg(
         language === 'ar'
@@ -158,6 +178,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({ isOpen, onClose })
       paymentMethod,
       carrierName: 'Aramex Tunisie Logistics',
       notes: notes.trim() || undefined,
+      clientRequestId,
     });
     setIsSubmitting(false);
 
@@ -329,20 +350,22 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({ isOpen, onClose })
               </div>
 
               {/* Online Gateway Redirect Box */}
-              {completedOrder.paymentMethod === 'online_payment' && gatewayPayUrl && (
+              {completedOrder.paymentMethod === 'online_payment' && gatewayPayUrl && gatewayPayUrl.startsWith('https://') && (
                 <div className="max-w-xl mx-auto p-4 rounded-2xl bg-blue-50 dark:bg-blue-500/10 border border-blue-200 dark:border-blue-500/30 space-y-3 text-center">
                   <p className="text-xs font-bold text-blue-900 dark:text-blue-200">
                     {language === 'ar'
-                      ? 'تم تجهيز جلسة الدفع المؤمّنة. اضغط للمتابعة لإتمام السداد عبر البوابة المعتمدة.'
-                      : 'Secure online payment session created. Proceed to complete payment on the certified gateway.'}
+                      ? 'تم تجهيز جلسة الدفع المؤمّنة. اضغط للمتابعة لإتمام السداد وسيتم إرجاعك تلقائياً لتأكيد الطلب.'
+                      : language === 'fr'
+                      ? 'Session de paiement sécurisée prête. Cliquez pour finaliser le paiement puis revenir automatiquement.'
+                      : 'Secure online payment session created. Proceed to complete payment and return automatically.'}
                   </p>
                   <a
                     href={gatewayPayUrl}
-                    target="_blank"
-                    rel="noreferrer"
+                    target={typeof window !== 'undefined' && window.self !== window.top ? '_blank' : '_self'}
+                    rel="noopener noreferrer"
                     className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#FF6B00] hover:bg-[#e05e00] text-white text-xs font-bold"
                   >
-                    <span>{language === 'ar' ? 'الانتقال لبوابة الدفع المؤمّنة' : 'Continue to Payment Gateway'}</span>
+                    <span>{language === 'ar' ? 'الانتقال لبوابة الدفع المؤمّنة' : language === 'fr' ? 'Payer en ligne maintenant' : 'Continue to Payment Gateway'}</span>
                     <ExternalLink className="w-3.5 h-3.5" />
                   </a>
                 </div>

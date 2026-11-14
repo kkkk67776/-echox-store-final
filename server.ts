@@ -1,6 +1,7 @@
 import express, { Request, Response } from 'express';
 import { createServer as createViteServer } from 'vite';
 import crypto from 'crypto';
+import dns from 'dns';
 import dotenv from 'dotenv';
 import path from 'path';
 import fs from 'fs';
@@ -23,6 +24,7 @@ import {
   adminDeleteOrder,
   trackPublicOrder,
   handlePaymentWebhook,
+  verifyGatewayReturn,
   createSupportContribution,
   adminVerifySupportTransaction,
   hydratePaymentDbFromCloud,
@@ -30,6 +32,15 @@ import {
   isBankIdentityChange,
   isEnvLockedBank,
 } from './server/paymentEngine';
+import {
+  getPublicStoreState,
+  getAdminStoreState,
+  updateAdminStoreState,
+  addPublicProductReview,
+  addPublicInquiry,
+  adminReplyToInquiry,
+  hydrateStoreStateFromCloud,
+} from './server/storeEngine';
 import {
   atomicWriteJsonSync,
   flushCloudWrites,
@@ -52,6 +63,11 @@ import {
 
 dotenv.config();
 
+// Prefer IPv4 DNS resolution so Render/Docker external API calls (Konnect, Flouci, Upstash) never hang on broken IPv6 routes
+try {
+  dns.setDefaultResultOrder('ipv4first');
+} catch {}
+
 // Fix any mismatched container env vars
 if (process.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID === 'G-LLXC1GEL75') {
   process.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID = 'ai-studio-echoxstore-9e1d54e8-7960-44b2-951a-524166c61a13';
@@ -64,7 +80,14 @@ const app = express();
 app.set('trust proxy', 1);
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
-app.use(express.json({ limit: '6mb' }));
+app.use(
+  express.json({
+    limit: '6mb',
+    verify: (req, _res, buf) => {
+      (req as any).rawBodyText = buf.toString('utf8');
+    },
+  })
+);
 
 function isHttpsRequest(req: Request): boolean {
   const proto = (req.headers['x-forwarded-proto'] as string) || '';
@@ -76,25 +99,39 @@ function buildSessionCookie(req: Request, value: string, maxAgeSeconds: number):
   return `__session=${value}; Path=/; Max-Age=${maxAgeSeconds}; SameSite=Lax; HttpOnly${secureFlag}`;
 }
 
+function normalizeIpString(raw: string): string {
+  let ip = (raw || '').trim();
+  if (!ip) return '127.0.0.1';
+  if (ip === '::1') return '127.0.0.1';
+  if (ip.toLowerCase().startsWith('::ffff:')) {
+    ip = ip.slice(7);
+  }
+  return ip || '127.0.0.1';
+}
+
 function getClientIp(req: Request): string {
   const cfIp = (req.headers['cf-connecting-ip'] as string) || '';
-  if (cfIp.trim()) return cfIp.trim();
+  if (cfIp.trim()) return normalizeIpString(cfIp);
   const fwd = (req.headers['x-forwarded-for'] as string) || '';
   const first = fwd.split(',')[0].trim();
-  return first || req.ip || req.socket.remoteAddress || '127.0.0.1';
+  return normalizeIpString(first || req.ip || req.socket.remoteAddress || '127.0.0.1');
 }
 
 function getRequestOrigin(req: Request): string {
-  const configured = (process.env.SITE_URL || process.env.VITE_SITE_URL || '').trim().replace(/\/$/, '');
-  if (configured) return configured;
-
+  const hostHeader = (req.headers['x-forwarded-host'] as string) || req.get('host') || '';
   const protoHeader = (req.headers['x-forwarded-proto'] as string) || req.protocol || 'https';
   const proto = protoHeader.split(',')[0].trim();
-  const hostHeader = (req.headers['x-forwarded-host'] as string) || req.get('host') || '';
   if (hostHeader && !hostHeader.includes('localhost') && !hostHeader.includes('127.0.0.1') && !hostHeader.includes('0.0.0.0')) {
     return `${proto}://${hostHeader}`.replace(/\/$/, '');
   }
-  return 'https://echoxstore.pages.dev';
+
+  const configured = (process.env.SITE_URL || process.env.VITE_SITE_URL || '').trim().replace(/\/$/, '');
+  if (configured) return configured;
+
+  if (hostHeader) {
+    return `${proto}://${hostHeader}`.replace(/\/$/, '');
+  }
+  return 'https://echox-store.onrender.com';
 }
 
 function escapeXml(str: string): string {
@@ -110,8 +147,44 @@ function getDynamicCatalogProductIds(): string[] {
   return getActiveCatalogProductIds();
 }
 
-// Security & SEO indexing headers middleware (compatible with iframe previews and Google Auth popups)
+// Security, CORS (Cloudflare Pages <-> Render) & SEO indexing headers middleware
+function isAllowedOrigin(origin: string): boolean {
+  if (!origin) return false;
+  if (
+    origin === 'https://echoxstore.pages.dev' ||
+    origin === 'https://echox-store.onrender.com' ||
+    origin === process.env.SITE_URL ||
+    origin === process.env.VITE_SITE_URL
+  ) {
+    return true;
+  }
+  try {
+    const u = new URL(origin);
+    if (u.protocol === 'https:' && (u.hostname.endsWith('.echoxstore.pages.dev') || u.hostname === 'echoxstore.pages.dev')) {
+      return true;
+    }
+    if (u.hostname === 'localhost' || u.hostname === '127.0.0.1') {
+      return true;
+    }
+  } catch {
+    return false;
+  }
+  return false;
+}
+
 app.use((req: Request, res: Response, next) => {
+  const reqOrigin = (req.headers.origin as string) || '';
+  if (isAllowedOrigin(reqOrigin)) {
+    res.setHeader('Access-Control-Allow-Origin', reqOrigin);
+    res.setHeader('Vary', 'Origin');
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    if (req.method === 'OPTIONS') {
+      return res.status(204).end();
+    }
+  }
+
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   res.setHeader('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
@@ -1391,7 +1464,10 @@ app.post('/api/payments/checkout', async (req: Request, res: Response) => {
     return res.status(429).json({ success: false, error: `تم تجاوز حد الطلبات، يرجى الانتظار ${rate.retryAfterSeconds} ثانية.` });
   }
   try {
-    const result = await processServerCheckout(req.body);
+    const result = await processServerCheckout({
+      ...(req.body || {}),
+      origin: getRequestOrigin(req),
+    });
     if (!result.ok) {
       return res.status(result.statusCode || 400).json({ success: false, error: result.error });
     }
@@ -1442,8 +1518,8 @@ app.post('/api/payments/request-refund', (req: Request, res: Response) => {
   return res.json({ success: true, refundRequest: result.refundRequest });
 });
 
-// 6. Server-Side Payment Webhook (Signature Verified + Idempotent Replay Guard)
-app.post('/api/payments/webhook/:provider', async (req: Request, res: Response) => {
+// 6. Server-Side Payment Webhook (Supports both GET silentWebhook & POST signed Webhook)
+const handleWebhookRoute = async (req: Request, res: Response) => {
   const provider = req.params.provider || 'konnect';
   const sigHeader =
     (req.headers['x-konnect-signature'] as string) ||
@@ -1452,10 +1528,35 @@ app.post('/api/payments/webhook/:provider', async (req: Request, res: Response) 
 
   const result = await handlePaymentWebhook({
     provider,
+    method: req.method === 'GET' ? 'GET' : 'POST',
     signatureHeader: sigHeader,
     rawBody: req.body,
+    rawBodyText: (req as any).rawBodyText,
+    query: req.query as Record<string, any>,
   });
   return res.status(result.statusCode).json(result);
+};
+
+app.get('/api/payments/webhook/:provider', handleWebhookRoute);
+app.post('/api/payments/webhook/:provider', handleWebhookRoute);
+
+// 6.1 Authoritative Return Verification after Gateway Redirect (Konnect / Flouci)
+app.get('/api/payments/verify-return', async (req: Request, res: Response) => {
+  const ip = getClientIp(req);
+  const rate = checkSlidingWindowLimit('verifyReturn', ip, 30, 60 * 1000);
+  if (!rate.allowed) {
+    return res.status(429).json({ success: false, error: `تم تجاوز الحد المسموح، يرجى الانتظار ${rate.retryAfterSeconds} ثانية.` });
+  }
+  res.setHeader('Cache-Control', 'no-store');
+  const result = await verifyGatewayReturn({
+    tracking: String(req.query.tracking || ''),
+    paymentRef: String(req.query.payment_ref || req.query.payment_id || ''),
+    provider: String(req.query.provider || ''),
+  });
+  if (!result.ok) {
+    return res.status(result.statusCode || 404).json({ success: false, error: result.error });
+  }
+  return res.json({ success: true, ...result });
 });
 
 // 7. Scoped Vendor Financial Ledger View (Strict Vendor Data Isolation)
@@ -1468,17 +1569,29 @@ app.get('/api/vendor/:vendorId/financials', (req: Request, res: Response) => {
 });
 
 // 8. Independent Support ECHOX Endpoints (Rate limited per IP)
-app.post('/api/support/contribute', (req: Request, res: Response) => {
+app.post('/api/support/contribute', async (req: Request, res: Response) => {
   const ip = getClientIp(req);
   const rate = checkSlidingWindowLimit('supportContribute', ip, 15, 60 * 1000);
   if (!rate.allowed) {
     return res.status(429).json({ success: false, error: `تم تجاوز حد الطلبات، يرجى الانتظار ${rate.retryAfterSeconds} ثانية.` });
   }
-  const result = createSupportContribution(req.body || {});
-  if (!result.ok) {
-    return res.status(result.statusCode || 400).json({ success: false, error: result.error });
+  try {
+    const result = await createSupportContribution({
+      ...(req.body || {}),
+      origin: getRequestOrigin(req),
+    });
+    if (!result.ok) {
+      return res.status(result.statusCode || 400).json({ success: false, error: result.error });
+    }
+    return res.json({
+      success: true,
+      supportTransaction: result.supportTransaction,
+      paymentUrl: result.paymentUrl,
+    });
+  } catch (err: any) {
+    console.error('[Support] Contribution error:', err);
+    return res.status(500).json({ success: false, error: 'تعذر معالجة مساهمة الدعم حالياً.' });
   }
-  return res.json({ success: true, supportTransaction: result.supportTransaction });
 });
 
 // 9. Admin Panel Payment Management Routes (Protected by requireAdminAuth)
@@ -1721,13 +1834,86 @@ app.put('/api/admin/chat/config', (req: Request, res: Response) => {
   return res.json({ success: true, config: updated });
 });
 
+// ==========================================
+// 🏪 SERVER-SYNCHRONIZED STOREFRONT STATE APIS
+// ==========================================
+app.get('/api/store/state', (_req: Request, res: Response) => {
+  res.setHeader('Cache-Control', 'no-store');
+  return res.json({
+    success: true,
+    ...getPublicStoreState(),
+  });
+});
+
+app.get('/api/admin/store/state', (req: Request, res: Response) => {
+  if (!requireAdminAuth(req, res)) return;
+  res.setHeader('Cache-Control', 'no-store');
+  return res.json({
+    success: true,
+    ...getAdminStoreState(),
+  });
+});
+
+app.put('/api/admin/store/state', (req: Request, res: Response) => {
+  if (!requireAdminAuth(req, res)) return;
+  const result = updateAdminStoreState(req.body || {});
+  if (!result.ok) {
+    return res.status(400).json({ success: false, error: result.error });
+  }
+  // Keep server-side payment catalog prices in exact sync with edited products
+  syncCatalogSnapshot(result.state.products, { replaceAll: true });
+  return res.json({
+    success: true,
+    ...result.state,
+  });
+});
+
+app.post('/api/store/products/:productId/reviews', (req: Request, res: Response) => {
+  const ip = getClientIp(req);
+  const rate = checkSlidingWindowLimit('productReview', ip, 15, 60 * 1000);
+  if (!rate.allowed) {
+    return res.status(429).json({ success: false, error: `تم تجاوز الحد المسموح، يرجى الانتظار ${rate.retryAfterSeconds} ثانية.` });
+  }
+  const result = addPublicProductReview(req.params.productId, req.body || {});
+  if (!result.ok) {
+    return res.status(400).json({ success: false, error: result.error });
+  }
+  return res.json({ success: true, product: result.product });
+});
+
+app.post('/api/store/inquiries', (req: Request, res: Response) => {
+  const ip = getClientIp(req);
+  const rate = checkSlidingWindowLimit('inquiries', ip, 10, 60 * 1000);
+  if (!rate.allowed) {
+    return res.status(429).json({ success: false, error: `تم تجاوز الحد المسموح، يرجى الانتظار ${rate.retryAfterSeconds} ثانية.` });
+  }
+  const result = addPublicInquiry(req.body || {});
+  if (!result.ok) {
+    return res.status(400).json({ success: false, error: result.error });
+  }
+  return res.json({ success: true, inquiry: result.inquiry });
+});
+
+app.post('/api/admin/store/inquiries/:inquiryId/reply', (req: Request, res: Response) => {
+  if (!requireAdminAuth(req, res)) return;
+  const result = adminReplyToInquiry(req.params.inquiryId, req.body?.reply || '');
+  if (!result.ok) {
+    return res.status(400).json({ success: false, error: result.error });
+  }
+  return res.json({ success: true, inquiry: result.inquiry });
+});
+
 // --- PRODUCTION STATIC OR VITE DEV MIDDLEWARE ---
 async function startServer() {
   await Promise.all([
     initCentralSecurityConfig().catch((err) => console.error('[Security] Init notice:', err)),
     hydratePaymentDbFromCloud().catch((err) => console.error('[PaymentEngine] Cloud hydrate notice:', err)),
     hydrateChatDbFromCloud().catch((err) => console.error('[ChatEngine] Cloud hydrate notice:', err)),
+    hydrateStoreStateFromCloud().catch((err) => console.error('[StoreEngine] Cloud hydrate notice:', err)),
   ]);
+
+  // Synchronize authoritative payment catalog with persisted store products on startup
+  syncCatalogSnapshot(getPublicStoreState().products, { replaceAll: true });
 
   const isProd = process.env.NODE_ENV === 'production';
   const distDir = path.resolve(process.cwd(), 'dist');

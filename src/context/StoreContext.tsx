@@ -53,8 +53,6 @@ import {
   getAuthorizedOwnerPhone, 
   setAuthorizedOwnerPhone 
 } from '../lib/security';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
-import { db } from '../lib/firebase';
 
 
 interface StoreContextType {
@@ -132,6 +130,8 @@ interface StoreContextType {
   // Orders & Payments
   paymentConfig: PaymentSystemPublicConfig;
   refreshPaymentConfig: () => Promise<void>;
+  refreshStoreState: () => Promise<void>;
+  refreshAdminStoreState: () => Promise<{ ok: boolean; error?: string }>;
   orders: Order[];
   createOrder: (orderData: {
     customerName: string;
@@ -151,6 +151,7 @@ interface StoreContextType {
     carrierName?: string;
     notes?: string;
     transferProof?: Partial<TransferProof>;
+    clientRequestId?: string;
   }) => Promise<{ ok: boolean; order?: Order; paymentUrl?: string; error?: string }>;
   updateOrderInState: (updatedOrder: Order) => void;
   syncOrdersFromServer: (serverOrders: Order[]) => void;
@@ -176,9 +177,9 @@ interface StoreContextType {
   
   // Settings
   siteSettings: SiteSettings;
-  updateSiteSettings: (settings: Partial<SiteSettings>) => void;
+  updateSiteSettings: (settings: Partial<SiteSettings>) => Promise<{ ok: boolean; error?: string }>;
   ownerSettings: OwnerSettings;
-  updateOwnerSettings: (settings: Partial<OwnerSettings>) => void;
+  updateOwnerSettings: (settings: Partial<OwnerSettings>) => Promise<{ ok: boolean; error?: string }>;
   
   // Dark Mode
   isDarkMode: boolean;
@@ -411,16 +412,39 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   }, [categories]);
 
+  const pushAdminStoreState = async (patch: Record<string, unknown>): Promise<{ ok: boolean; error?: string }> => {
+    try {
+      const res = await fetch('/api/admin/store/state', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(patch),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.success) {
+        return {
+          ok: false,
+          error: data?.error || (res.status === 401 || res.status === 403 ? 'جلسة المالك غير نشطة على الخادم.' : 'تعذر حفظ التعديلات على الخادم.'),
+        };
+      }
+      return { ok: true };
+    } catch {
+      return { ok: false, error: 'تعذر الاتصال بالخادم لحفظ التغييرات.' };
+    }
+  };
+
   const addCategory = (category: CategoryItem) => {
-    setCategories(prev => {
-      if (prev.some(c => c.id === category.id)) return prev;
-      return [...prev, category];
-    });
+    if (categories.some(c => c.id === category.id)) return;
+    const next = [...categories, category];
+    setCategories(next);
+    void pushAdminStoreState({ categories: next });
   };
 
   const deleteCategory = (id: string) => {
     if (id === 'all') return;
-    setCategories(prev => prev.filter(c => c.id !== id));
+    const next = categories.filter(c => c.id !== id);
+    setCategories(next);
+    void pushAdminStoreState({ categories: next });
   };
 
   // 5.2 Banners & Promos
@@ -457,15 +481,21 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       ...bannerData,
       id: `banner_${Date.now()}`
     };
-    setBanners(prev => [newBanner, ...prev]);
+    const next = [newBanner, ...banners];
+    setBanners(next);
+    void pushAdminStoreState({ banners: next });
   };
 
   const deleteBanner = (id: string) => {
-    setBanners(prev => prev.filter(b => b.id !== id));
+    const next = banners.filter(b => b.id !== id);
+    setBanners(next);
+    void pushAdminStoreState({ banners: next });
   };
 
   const toggleBannerActive = (id: string) => {
-    setBanners(prev => prev.map(b => b.id === id ? { ...b, active: !b.active } : b));
+    const next = banners.map(b => b.id === id ? { ...b, active: !b.active } : b);
+    setBanners(next);
+    void pushAdminStoreState({ banners: next });
   };
 
   // 5.3 Order Deletion & Manual Order Creation
@@ -571,70 +601,153 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   });
 
-  // Sync site settings from Firestore on mount
-  useEffect(() => {
-    let active = true;
-    async function loadCloudSiteSettings() {
-      try {
-        const snap = await getDoc(doc(db, 'store_settings', 'site'));
-        if (snap.exists() && active) {
-          const cloudData = snap.data() as Partial<SiteSettings>;
-          setSiteSettingsState(prev => {
-            const merged = { ...prev, ...cloudData };
-            try {
-              localStorage.setItem('echox_site_settings', JSON.stringify(merged));
-            } catch {}
-            return merged;
-          });
-        }
-      } catch (err) {
-        console.info('Cloud site settings load notice:', err);
-      }
+  const applyPublicServerState = (data: any) => {
+    if (!data || typeof data !== 'object') return;
+    if (Array.isArray(data.products)) {
+      const normProducts = data.products.map((p: Product) => ({
+        ...p,
+        images: (p.images || []).map(normalizeAssetUrl),
+      }));
+      setProducts(normProducts);
     }
-    loadCloudSiteSettings();
-    return () => { active = false; };
-  }, []);
-
-  const updateSiteSettings = (updates: Partial<SiteSettings>) => {
-    setSiteSettingsState(prev => {
-      const next = { ...prev, ...updates };
-      try {
-        localStorage.setItem('echox_site_settings', JSON.stringify(next));
-      } catch (e) {
-        console.warn('Storage write error:', e);
-      }
-      return next;
-    });
-
-    // Background sync to Firestore doc store_settings/site
-    try {
-      setDoc(doc(db, 'store_settings', 'site'), updates, { merge: true }).catch(err => {
-        console.info('Firestore settings sync notice:', err);
+    if (Array.isArray(data.companies)) {
+      const normCompanies = data.companies.map((c: Company) => ({
+        ...c,
+        logo: normalizeAssetUrl(c.logo),
+      }));
+      setCompanies(normCompanies);
+    }
+    if (Array.isArray(data.categories) && data.categories.length > 0) {
+      setCategories(data.categories);
+    }
+    if (Array.isArray(data.banners)) {
+      setBanners(data.banners);
+    }
+    if (data.siteSettings && typeof data.siteSettings === 'object') {
+      setSiteSettingsState(prev => {
+        const merged = { ...prev, ...data.siteSettings };
+        try {
+          localStorage.setItem('echox_site_settings', JSON.stringify(merged));
+        } catch {
+          // ignore
+        }
+        return merged;
       });
-    } catch (e) {
-      console.info('Firestore save exception notice:', e);
     }
   };
 
-  const updateOwnerSettings = (updates: Partial<OwnerSettings>) => {
+  const refreshStoreState = async (): Promise<void> => {
+    try {
+      const res = await fetch('/api/store/state', { cache: 'no-store' });
+      if (!res.ok) return;
+      const data = await res.json().catch(() => null);
+      if (data && data.success) {
+        applyPublicServerState(data);
+      }
+    } catch {
+      // keep cached state if offline
+    }
+  };
+
+  const refreshAdminStoreState = async (): Promise<{ ok: boolean; error?: string }> => {
+    try {
+      const res = await fetch('/api/admin/store/state', {
+        credentials: 'include',
+        cache: 'no-store',
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.success) {
+        return { ok: false, error: data?.error || 'تعذر مزامنة بيانات المتجر من الخادم.' };
+      }
+      applyPublicServerState(data);
+      if (data.ownerSettings && typeof data.ownerSettings === 'object') {
+        if (data.ownerSettings.loginEmail) setAuthorizedOwnerEmail(data.ownerSettings.loginEmail);
+        if (data.ownerSettings.primaryPhone) setAuthorizedOwnerPhone(data.ownerSettings.primaryPhone);
+        setOwnerSettingsState(prev => {
+          const merged = { ...prev, ...data.ownerSettings };
+          try {
+            localStorage.setItem('echox_owner_settings', JSON.stringify(merged));
+          } catch {
+            // ignore
+          }
+          return merged;
+        });
+      }
+      if (Array.isArray(data.inquiries)) {
+        setInquiries(data.inquiries);
+      }
+      return { ok: true };
+    } catch {
+      return { ok: false, error: 'تعذر الاتصال بالخادم.' };
+    }
+  };
+
+  // Load authoritative storefront state from server on mount & when tab regains focus
+  useEffect(() => {
+    void refreshStoreState();
+    let lastRefresh = Date.now();
+    const handleVisibilityOrFocus = () => {
+      if (document.visibilityState === 'visible' && Date.now() - lastRefresh > 5000) {
+        lastRefresh = Date.now();
+        void refreshStoreState();
+        void refreshPaymentConfig();
+      }
+    };
+    window.addEventListener('focus', handleVisibilityOrFocus);
+    document.addEventListener('visibilitychange', handleVisibilityOrFocus);
+    return () => {
+      window.removeEventListener('focus', handleVisibilityOrFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
+    };
+  }, []);
+
+  const updateSiteSettings = async (updates: Partial<SiteSettings>): Promise<{ ok: boolean; error?: string }> => {
+    const baseAddr = siteSettings.addressMultilingual || {
+      ar: siteSettings.address || '',
+      fr: siteSettings.address || '',
+      en: siteSettings.address || '',
+    };
+    const next: SiteSettings = {
+      ...siteSettings,
+      ...updates,
+      slogan: { ...siteSettings.slogan, ...(updates.slogan || {}) },
+      description: { ...siteSettings.description, ...(updates.description || {}) },
+      addressMultilingual: {
+        ar: updates.addressMultilingual?.ar ?? baseAddr.ar,
+        fr: updates.addressMultilingual?.fr ?? baseAddr.fr,
+        en: updates.addressMultilingual?.en ?? baseAddr.en,
+      },
+      workingHours: { ...siteSettings.workingHours, ...(updates.workingHours || {}) },
+      announcementText: { ...siteSettings.announcementText, ...(updates.announcementText || {}) },
+    };
+    setSiteSettingsState(next);
+    try {
+      localStorage.setItem('echox_site_settings', JSON.stringify(next));
+    } catch (e) {
+      console.warn('Storage write error:', e);
+    }
+    return pushAdminStoreState({ siteSettings: next });
+  };
+
+  const updateOwnerSettings = async (updates: Partial<OwnerSettings>): Promise<{ ok: boolean; error?: string }> => {
     if (updates.loginEmail) {
       setAuthorizedOwnerEmail(updates.loginEmail);
     }
     if (updates.primaryPhone) {
       setAuthorizedOwnerPhone(updates.primaryPhone);
     }
-    setOwnerSettingsState(prev => {
-      const next = { 
-        ...prev, 
-        ...updates
-      };
-      try {
-        localStorage.setItem('echox_owner_settings', JSON.stringify(next));
-      } catch (e) {
-        console.warn('Storage write error:', e);
-      }
-      return next;
-    });
+    const next = {
+      ...ownerSettings,
+      ...updates,
+      bio: { ...ownerSettings.bio, ...(updates.bio || {}) },
+    };
+    setOwnerSettingsState(next);
+    try {
+      localStorage.setItem('echox_owner_settings', JSON.stringify(next));
+    } catch (e) {
+      console.warn('Storage write error:', e);
+    }
+    return pushAdminStoreState({ ownerSettings: next });
   };
 
   // 7. Cart & Discounts
@@ -859,31 +972,31 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       reviewCount: 0,
       reviews: []
     };
-    setProducts(prev => {
-      const next = [newProduct, ...prev];
-      syncAdminCatalogToPaymentEngine(next);
-      return next;
-    });
+    const next = [newProduct, ...products];
+    setProducts(next);
+    void pushAdminStoreState({ products: next });
+    void syncAdminCatalogToPaymentEngine(next);
   };
 
   const updateProduct = (id: string, updates: Partial<Product>) => {
-    setProducts(prev => {
-      const next = prev.map(p => p.id === id ? { ...p, ...updates } : p);
-      syncAdminCatalogToPaymentEngine(next);
-      return next;
-    });
+    const next = products.map(p => p.id === id ? { ...p, ...updates } : p);
+    setProducts(next);
+    void pushAdminStoreState({ products: next });
+    void syncAdminCatalogToPaymentEngine(next);
   };
 
   const deleteProduct = (id: string) => {
-    setProducts(prev => prev.filter(p => p.id !== id));
+    const next = products.filter(p => p.id !== id);
+    setProducts(next);
+    void pushAdminStoreState({ products: next });
+    void syncAdminCatalogToPaymentEngine(next);
   };
 
   const toggleProductActive = (id: string) => {
-    setProducts(prev => {
-      const next = prev.map(p => p.id === id ? { ...p, active: !p.active } : p);
-      syncAdminCatalogToPaymentEngine(next);
-      return next;
-    });
+    const next = products.map(p => p.id === id ? { ...p, active: !p.active } : p);
+    setProducts(next);
+    void pushAdminStoreState({ products: next });
+    void syncAdminCatalogToPaymentEngine(next);
   };
 
   const addProductReview = (productId: string, review: Omit<Review, 'id' | 'date'>) => {
@@ -903,6 +1016,18 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         reviewCount: updatedReviews.length
       };
     }));
+    void fetch(`/api/store/products/${encodeURIComponent(productId)}/reviews`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(review),
+    })
+      .then(res => res.json().catch(() => null))
+      .then(data => {
+        if (data?.success && data.product) {
+          setProducts(prev => prev.map(p => (p.id === productId ? data.product : p)));
+        }
+      })
+      .catch(() => {});
   };
 
   // 12. Companies CRUD
@@ -911,15 +1036,21 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       ...compData,
       id: `comp_${Date.now()}`
     };
-    setCompanies(prev => [...prev, newCompany]);
+    const next = [...companies, newCompany];
+    setCompanies(next);
+    void pushAdminStoreState({ companies: next });
   };
 
   const updateCompany = (id: string, updates: Partial<Company>) => {
-    setCompanies(prev => prev.map(c => c.id === id ? { ...c, ...updates } : c));
+    const next = companies.map(c => c.id === id ? { ...c, ...updates } : c);
+    setCompanies(next);
+    void pushAdminStoreState({ companies: next });
   };
 
   const deleteCompany = (id: string) => {
-    setCompanies(prev => prev.filter(c => c.id !== id));
+    const next = companies.filter(c => c.id !== id);
+    setCompanies(next);
+    void pushAdminStoreState({ companies: next });
   };
 
   // 13. Orders
@@ -980,6 +1111,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     carrierName?: string;
     notes?: string;
     transferProof?: Partial<TransferProof>;
+    clientRequestId?: string;
   }): Promise<{ ok: boolean; order?: Order; paymentUrl?: string; error?: string }> => {
     const payload = {
       customerId: currentUser?.id,
@@ -1002,6 +1134,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       carrierName: orderData.carrierName || 'Aramex Express Tunisie',
       notes: orderData.notes,
       transferProof: orderData.transferProof,
+      clientRequestId: orderData.clientRequestId,
     };
 
     const res = await submitServerCheckout(payload);
@@ -1009,7 +1142,11 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       return { ok: false, error: res.error || 'تعذر تسجيل الطلب على الخادم.' };
     }
 
-    setOrders(prev => [res.order!, ...prev]);
+    setOrders(prev => {
+      const exists = prev.some(o => o.id === res.order!.id || o.trackingNumber === res.order!.trackingNumber);
+      if (exists) return prev.map(o => (o.id === res.order!.id ? res.order! : o));
+      return [res.order!, ...prev];
+    });
     clearCart();
     return { ok: true, order: res.order, paymentUrl: res.paymentUrl };
   };
@@ -1156,6 +1293,18 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       read: false
     };
     setInquiries(prev => [newInquiry, ...prev]);
+    void fetch('/api/store/inquiries', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(inquiry),
+    })
+      .then(res => res.json().catch(() => null))
+      .then(data => {
+        if (data?.success && data.inquiry) {
+          setInquiries(prev => prev.map(i => (i.id === newInquiry.id ? data.inquiry : i)));
+        }
+      })
+      .catch(() => {});
   };
 
   const replyToInquiry = (inquiryId: string, reply: string) => {
@@ -1168,6 +1317,12 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         repliedAt: new Date().toISOString()
       };
     }));
+    void fetch(`/api/admin/store/inquiries/${encodeURIComponent(inquiryId)}/reply`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ reply }),
+    }).catch(() => {});
   };
 
   const [chatConfig, setChatConfig] = useState<SupportChatConfig>(DEFAULT_CHAT_CONFIG);
@@ -1398,6 +1553,8 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       
       paymentConfig,
       refreshPaymentConfig,
+      refreshStoreState,
+      refreshAdminStoreState,
       orders,
       createOrder,
       createServerOrder,

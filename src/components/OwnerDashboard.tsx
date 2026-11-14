@@ -42,8 +42,6 @@ import {
   RotateCcw,
   CreditCard
 } from 'lucide-react';
-import { doc, setDoc } from 'firebase/firestore';
-import { db } from '../lib/firebase';
 import { Product, Company, Order, OrderStatus, CategoryItem, PromoBanner, SiteSettings } from '../types';
 import { INITIAL_SITE_SETTINGS } from '../data/initialData';
 import { PaymentManagementTab } from './PaymentManagementTab';
@@ -117,6 +115,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
     toggleBannerActive,
     orders, 
     refreshAdminOrders,
+    refreshAdminStoreState,
     addManualOrder,
     updateOrderStatus,
     updateOrderInState,
@@ -165,6 +164,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
   const [footerWorkingHoursFr, setFooterWorkingHoursFr] = useState(siteSettings.workingHours?.fr || '');
   const [footerWorkingHoursEn, setFooterWorkingHoursEn] = useState(siteSettings.workingHours?.en || '');
   const [footerSavedSuccess, setFooterSavedSuccess] = useState(false);
+  const [footerSaveError, setFooterSaveError] = useState('');
   const [footerSaving, setFooterSaving] = useState(false);
   const [previewFooterLang, setPreviewFooterLang] = useState<'ar' | 'fr' | 'en'>('ar');
 
@@ -304,6 +304,17 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
     setFooterWorkingHoursEn(siteSettings.workingHours?.en || '');
   }, [siteSettings]);
 
+  useEffect(() => {
+    if (ownerSettings.loginEmail) setEditOwnerEmail(ownerSettings.loginEmail);
+    if (ownerSettings.primaryPhone) setEditOwnerPhone(ownerSettings.primaryPhone);
+  }, [ownerSettings.loginEmail, ownerSettings.primaryPhone]);
+
+  useEffect(() => {
+    if (authorized) {
+      void refreshAdminStoreState();
+    }
+  }, [authorized]);
+
   // Load Active Sessions & Security Engine Status
   useEffect(() => {
     let active = true;
@@ -377,29 +388,35 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
   const completedOrdersCount = orders.filter(o => o.status === 'delivered').length;
 
   // Handlers for Account & Security
-  const handleSaveEmail = (e: React.FormEvent) => {
+  const handleSaveEmail = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editOwnerEmail.trim() || !editOwnerEmail.includes('@')) return;
     setAuthorizedOwnerEmail(editOwnerEmail.trim());
-    updateOwnerSettings({ loginEmail: editOwnerEmail.trim() });
-    setEmailSavedSuccess(true);
-    setTimeout(() => setEmailSavedSuccess(false), 3000);
+    const res = await updateOwnerSettings({ loginEmail: editOwnerEmail.trim() });
+    if (res.ok) {
+      setEmailSavedSuccess(true);
+      setTimeout(() => setEmailSavedSuccess(false), 3000);
+    }
   };
 
-  const handleSavePhone = (e: React.FormEvent) => {
+  const handleSavePhone = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editOwnerPhone.trim()) return;
     setAuthorizedOwnerPhone(editOwnerPhone.trim());
-    updateOwnerSettings({ primaryPhone: editOwnerPhone.trim(), secondaryPhone: editOwnerPhone.trim() });
-    updateSiteSettings({ supportPhone: editOwnerPhone.trim(), whatsappPhone: editOwnerPhone.trim().replace(/\D/g, '') });
-    setPhoneSavedSuccess(true);
-    setTimeout(() => setPhoneSavedSuccess(false), 3000);
+    await updateOwnerSettings({ primaryPhone: editOwnerPhone.trim(), secondaryPhone: editOwnerPhone.trim() });
+    const siteRes = await updateSiteSettings({ supportPhone: editOwnerPhone.trim(), whatsappPhone: editOwnerPhone.trim().replace(/\D/g, '') });
+    if (siteRes.ok) {
+      setPhoneSavedSuccess(true);
+      setTimeout(() => setPhoneSavedSuccess(false), 3000);
+    }
   };
 
   // Handler for Footer & Store Info Form Save
   const handleSaveFooterSettings = async (e: React.FormEvent) => {
     e.preventDefault();
     setFooterSaving(true);
+    setFooterSaveError('');
+    setFooterSavedSuccess(false);
 
     const cleanWhatsapp = footerWhatsappPhone.replace(/\D/g, '');
 
@@ -426,16 +443,14 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
       }
     };
 
-    updateSiteSettings(updated);
+    const res = await updateSiteSettings(updated);
+    setFooterSaving(false);
 
-    // Sync to Firestore doc store_settings/site
-    try {
-      await setDoc(doc(db, 'store_settings', 'site'), updated, { merge: true });
-    } catch (err) {
-      console.info('Firestore store_settings/site save notice:', err);
+    if (!res.ok) {
+      setFooterSaveError(res.error || 'تعذر حفظ التعديلات على الخادم.');
+      return;
     }
 
-    setFooterSaving(false);
     setFooterSavedSuccess(true);
     setTimeout(() => setFooterSavedSuccess(false), 4000);
   };
@@ -1596,14 +1611,21 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
             </div>
           </div>
 
-          {/* Success Banner */}
+          {/* Success / Error Banner */}
+          {footerSaveError && (
+            <div className="p-4 bg-red-500/10 border-2 border-red-500/30 rounded-2xl text-xs text-red-600 dark:text-red-400 font-bold flex items-center gap-2.5 shadow-sm">
+              <AlertTriangle className="w-5 h-5 shrink-0" />
+              <span>{footerSaveError}</span>
+            </div>
+          )}
+
           {footerSavedSuccess && (
             <div className="p-4 bg-emerald-500/15 border-2 border-emerald-500/30 rounded-2xl text-xs text-emerald-600 dark:text-emerald-400 font-bold flex items-center gap-2.5 shadow-sm animate-scaleUp">
               <CheckCircle2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400 shrink-0" />
               <div>
-                <p className="font-black">تم حفظ وتحديث إعدادات تذييل الصفحة بنجاح! ✓</p>
+                <p className="font-black">تم حفظ وتحديث إعدادات تذييل الصفحة على الخادم بنجاح! ✓</p>
                 <p className="text-[11px] font-normal opacity-90 mt-0.5">
-                  تم التحديث فورياً في ذاكرة التخزين السريع وقاعدة البيانات السحابية (Firestore) بجميع اللغات.
+                  تمت المزامنة مركزياً على الخادم لتظهر التغييرات الجديدة فورياً على جميع الأجهزة والمتصفحات.
                 </p>
               </div>
             </div>

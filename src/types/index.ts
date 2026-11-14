@@ -189,6 +189,7 @@ export interface OnlineGatewayPublicConfig {
     ok: boolean;
     message: string;
   };
+  webhookPath?: string;
 }
 
 export interface PaymentSystemPublicConfig {
@@ -273,6 +274,8 @@ export interface SupportTransaction {
   amount: number;
   currency: string;
   method: 'cod' | 'bank_transfer' | 'online_payment';
+  provider?: string;
+  externalPaymentId?: string;
   status: PaymentStatus;
   transferProof?: TransferProof;
   createdAt: string;
