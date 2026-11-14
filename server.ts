@@ -60,6 +60,23 @@ import {
   recordCustomerChatExchange,
   updateChatConfig,
 } from './server/chatEngine';
+import {
+  clearAdminNotifications,
+  emitAdminNotification,
+  emitPublicStoreNotification,
+  emitSecurityAlertRateLimited,
+  getAdminNotificationsOverview,
+  getPublicAnnouncements,
+  getVapidPublicKey,
+  hydrateNotificationsFromCloud,
+  markAdminNotificationsRead,
+  sendTestAdminPush,
+  subscribeAdminPush,
+  subscribePublicPush,
+  unsubscribeAdminPush,
+  unsubscribePublicPush,
+  updateNotificationSettings,
+} from './server/notificationEngine';
 
 dotenv.config();
 
@@ -152,15 +169,20 @@ function isAllowedOrigin(origin: string): boolean {
   if (!origin) return false;
   if (
     origin === 'https://echoxstore.pages.dev' ||
+    origin === 'https://echox-store-final.pages.dev' ||
     origin === 'https://echox-store.onrender.com' ||
     origin === process.env.SITE_URL ||
-    origin === process.env.VITE_SITE_URL
+    origin === process.env.VITE_SITE_URL ||
+    origin === process.env.CORS_ORIGIN
   ) {
     return true;
   }
   try {
     const u = new URL(origin);
-    if (u.protocol === 'https:' && (u.hostname.endsWith('.echoxstore.pages.dev') || u.hostname === 'echoxstore.pages.dev')) {
+    if (
+      u.protocol === 'https:' &&
+      /^([a-z0-9-]+\.)*echox[a-z0-9-]*\.pages\.dev$/i.test(u.hostname)
+    ) {
       return true;
     }
     if (u.hostname === 'localhost' || u.hostname === '127.0.0.1') {
@@ -324,7 +346,30 @@ function loadOrCreateHmacSecret(): string {
   return generated;
 }
 
-const HMAC_SECRET = loadOrCreateHmacSecret();
+let runtimeHmacSecret = loadOrCreateHmacSecret();
+const CLOUD_HMAC_KEY = 'echox:security_hmac_secret';
+
+function getHmacSecret(): string {
+  return runtimeHmacSecret;
+}
+
+async function initHmacSecretFromCloud(): Promise<void> {
+  if ((process.env.ECHOX_SECURITY_HMAC_SECRET || '').trim().length >= 16) return;
+  if (!isCloudPersistenceEnabled()) return;
+  try {
+    const cloudVal = await loadCloudJson<{ secret?: string }>(CLOUD_HMAC_KEY);
+    if (cloudVal && typeof cloudVal.secret === 'string' && cloudVal.secret.length >= 32) {
+      runtimeHmacSecret = cloudVal.secret;
+      try {
+        fs.writeFileSync(getDataFilePath('.hmac_secret'), runtimeHmacSecret, { encoding: 'utf-8', mode: 0o600 });
+      } catch {}
+      return;
+    }
+    pushCloudJson(CLOUD_HMAC_KEY, { secret: runtimeHmacSecret, updatedAt: new Date().toISOString() });
+  } catch (err) {
+    console.warn('[Security] Cloud HMAC sync notice:', err);
+  }
+}
 
 // Pre-computed one-way Argon2id bootstrap hashes (zero plaintext credentials stored in code)
 const DEFAULT_ACCESS_ARGON2 =
@@ -415,10 +460,10 @@ function checkSlidingWindowLimit(namespace: string, ip: string, maxRequests: num
 function signSessionId(sessionId: string, issuedAt?: number, expiresAt?: number, codeVerified?: boolean): string {
   if (issuedAt && expiresAt) {
     const payload = `v2.${sessionId}.${issuedAt}.${expiresAt}.${codeVerified ? '1' : '0'}`;
-    const hmac = crypto.createHmac('sha256', HMAC_SECRET).update(payload).digest('hex');
+    const hmac = crypto.createHmac('sha256', getHmacSecret()).update(payload).digest('hex');
     return `${payload}.${hmac}`;
   }
-  const hmac = crypto.createHmac('sha256', HMAC_SECRET).update(sessionId).digest('hex');
+  const hmac = crypto.createHmac('sha256', getHmacSecret()).update(sessionId).digest('hex');
   return `${sessionId}.${hmac}`;
 }
 
@@ -433,7 +478,7 @@ function verifySignedSessionDetailed(cookieVal: string): {
   if (parts.length === 6 && parts[0] === 'v2') {
     const [ver, sessionId, iatStr, expStr, cvStr, hmac] = parts;
     const payload = `${ver}.${sessionId}.${iatStr}.${expStr}.${cvStr}`;
-    const expected = crypto.createHmac('sha256', HMAC_SECRET).update(payload).digest('hex');
+    const expected = crypto.createHmac('sha256', getHmacSecret()).update(payload).digest('hex');
     if (hmac.length === expected.length && crypto.timingSafeEqual(Buffer.from(hmac), Buffer.from(expected))) {
       const issuedAt = Number(iatStr);
       const expiresAt = Number(expStr);
@@ -455,7 +500,7 @@ function verifySignedSessionDetailed(cookieVal: string): {
   }
   if (parts.length !== 2) return null;
   const [sessionId, hmac] = parts;
-  const expected = crypto.createHmac('sha256', HMAC_SECRET).update(sessionId).digest('hex');
+  const expected = crypto.createHmac('sha256', getHmacSecret()).update(sessionId).digest('hex');
   if (hmac.length === expected.length && crypto.timingSafeEqual(Buffer.from(hmac), Buffer.from(expected))) {
     return { sessionId };
   }
@@ -466,6 +511,16 @@ function verifySignedSession(cookieVal: string): string | null {
   return verifySignedSessionDetailed(cookieVal)?.sessionId || null;
 }
 
+function extractSessionTokenFromReq(req: Request): string {
+  const cookies = parseCookies(req);
+  if (cookies['__session']) return cookies['__session'];
+  const auth = req.headers.authorization;
+  if (typeof auth === 'string' && auth.startsWith('Bearer ')) {
+    return auth.slice(7).trim();
+  }
+  return '';
+}
+
 function resolveSessionRecord(req: Request): {
   rawSessionId: string;
   email: string;
@@ -473,8 +528,7 @@ function resolveSessionRecord(req: Request): {
   codeVerified: boolean;
   expiresAt: number;
 } | null {
-  const cookies = parseCookies(req);
-  const cookieVal = cookies['__session'];
+  const cookieVal = extractSessionTokenFromReq(req);
   if (!cookieVal) return null;
   const parsed = verifySignedSessionDetailed(cookieVal);
   if (!parsed) return null;
@@ -803,6 +857,13 @@ app.post('/api/security/emergencyLockdown', (req: Request, res: Response) => {
     ]);
 
     console.warn(`[ECHOX_SECURITY_LOCKDOWN] Emergency Lockdown triggered! Revoked ${sessionCount} active sessions.`);
+    emitAdminNotification({
+      category: 'security',
+      severity: 'critical',
+      title: '🚨 تفعيل القفل الأمني الفوري',
+      body: `تم إنهاء كافة الجلسات النشطة (${sessionCount} جلسة) من غرفة الأمان.`,
+      url: '/owner/dashboard',
+    });
 
     return res.json({
       success: true,
@@ -1145,12 +1206,33 @@ app.post('/api/security/verifyAccessCode', async (req: Request, res: Response) =
 
     const fail = recordFailedAttempt('accessCode', ip, 5, 30000);
     if (fail.locked) {
+      emitSecurityAlertRateLimited(`lock_access_${ip}`, {
+        severity: 'critical',
+        title: '🚨 محاولة اختراق: تجميد بوابة رمز الوصول',
+        body: `تم حظر العنوان ${ip} مؤقتاً بعد 5 محاولات خاطئة لإدخال رمز الوصول السري.`,
+        url: '/owner/dashboard',
+        meta: { ip, type: 'access_code_lockout' },
+      });
       return res.status(429).json({
         success: false,
         lockedOut: true,
         remainingSeconds: fail.remainingSeconds,
         error: 'تجاوزت عدد المحاولات المسموح به. تم تجميد البوابة لمدة 30 ثانية.'
       });
+    }
+
+    if (trimmed.startsWith('#') || fail.attemptsLeft <= 2) {
+      emitSecurityAlertRateLimited(
+        `warn_access_${ip}`,
+        {
+          severity: 'warning',
+          title: '⚠️ محاولة فاشلة للدخول عبر رمز الوصول',
+          body: `محاولة إدخال رمز وصول غير صحيح من IP: ${ip} (المتبقي ${fail.attemptsLeft}).`,
+          url: '/owner/dashboard',
+          meta: { ip, attemptsLeft: fail.attemptsLeft },
+        },
+        15000
+      );
     }
 
     return res.status(401).json({
@@ -1224,12 +1306,20 @@ app.post('/api/security/verifyPin', async (req: Request, res: Response) => {
       return res.json({
         success: true,
         sessionId: rawSessionId,
+        sessionToken: signedCookie,
         message: 'تم التحقق بنجاح والدخول إلى مركز التحكم.'
       });
     }
 
     const fail = recordFailedAttempt('pin', ip, 5, 30000);
     if (fail.locked) {
+      emitSecurityAlertRateLimited(`lock_pin_${ip}`, {
+        severity: 'critical',
+        title: '🚨 تنبيه اختراق: قفل بوابة الـ PIN',
+        body: `تم تجميد بوابة الدخول للعنوان ${ip} بعد 5 محاولات PIN خاطئة!`,
+        url: '/owner/dashboard',
+        meta: { ip, type: 'pin_lockout' },
+      });
       return res.status(429).json({
         success: false,
         lockedOut: true,
@@ -1237,6 +1327,18 @@ app.post('/api/security/verifyPin', async (req: Request, res: Response) => {
         error: 'تجاوزت عدد محاولات PIN المسموحة. تم قفل البوابة مؤقتاً لمدة 30 ثانية.'
       });
     }
+
+    emitSecurityAlertRateLimited(
+      `warn_pin_${ip}`,
+      {
+        severity: 'critical',
+        title: '⚠️ محاولة PIN خاطئة على غرفة التحكم',
+        body: `تم إدخال رمز PIN خاطئ من ${ip} (المحاولات المتبقية: ${fail.attemptsLeft}).`,
+        url: '/owner/dashboard',
+        meta: { ip, attemptsLeft: fail.attemptsLeft },
+      },
+      10000
+    );
 
     return res.status(401).json({
       success: false,
@@ -1305,6 +1407,13 @@ app.post('/api/security/updateAccessCode', async (req: Request, res: Response) =
 
     persistCentralSecurityConfig(centralSecurityConfig!);
     resetBucket('accessCode', ip);
+    emitAdminNotification({
+      category: 'security',
+      severity: 'warning',
+      title: '🔐 تم تغيير رمز الوصول السري',
+      body: `تم تحديث رمز الوصول بنجاح من العنوان ${ip}.`,
+      url: '/owner/dashboard',
+    });
 
     return res.json({
       success: true,
@@ -1369,6 +1478,13 @@ app.post('/api/security/updatePin', async (req: Request, res: Response) => {
     } catch {}
 
     resetBucket('pin', ip);
+    emitAdminNotification({
+      category: 'security',
+      severity: 'warning',
+      title: '🔑 تم تغيير رمز الـ PIN لغرفة التحكم',
+      body: `تم تحديث رمز الـ PIN المشفر بنجاح من العنوان ${ip}.`,
+      url: '/owner/dashboard',
+    });
 
     return res.json({
       success: true,
@@ -1384,8 +1500,7 @@ app.post('/api/security/updatePin', async (req: Request, res: Response) => {
 // 5. Active Sessions List (Admin authenticated)
 app.get('/api/security/sessions', (req: Request, res: Response) => {
   if (!requireAdminAuth(req, res)) return;
-  const cookies = parseCookies(req);
-  const currentCookie = cookies['__session'];
+  const currentCookie = extractSessionTokenFromReq(req);
   const currentSessionId = currentCookie ? verifySignedSession(currentCookie) : null;
 
   const list: Array<{
@@ -1469,7 +1584,26 @@ app.post('/api/payments/checkout', async (req: Request, res: Response) => {
       origin: getRequestOrigin(req),
     });
     if (!result.ok) {
+      if ((result.statusCode || 400) >= 400 && /تلاعب|ملف|SVG|صورة/i.test(result.error || '')) {
+        emitSecurityAlertRateLimited(`checkout_sec_${ip}`, {
+          severity: 'critical',
+          title: '🚨 صد محاولة تلاعب في الدفع أو الأسعار',
+          body: `${result.error} (IP: ${ip})`,
+          url: '/owner/dashboard',
+        });
+      }
       return res.status(result.statusCode || 400).json({ success: false, error: result.error });
+    }
+    if (result.order) {
+      const ord = result.order;
+      emitAdminNotification({
+        category: 'order',
+        severity: 'success',
+        title: `🛒 طلب جديد #${ord.trackingNumber}`,
+        body: `${ord.customerName} — ${ord.totalAmount} د.ت (${ord.shippingAddress?.governorate || ''})`,
+        url: '/owner/dashboard',
+        meta: { trackingNumber: ord.trackingNumber, total: ord.totalAmount },
+      });
     }
     return res.json({
       success: true,
@@ -1490,8 +1624,8 @@ app.post('/api/payments/bank-transfer/proof', (req: Request, res: Response) => {
   if (!rate.allowed) {
     return res.status(429).json({ success: false, error: `تم تجاوز حد الإرسال، يرجى الانتظار ${rate.retryAfterSeconds} ثانية.` });
   }
-  const cookies = parseCookies(req);
-  const rawSid = cookies['__session'] ? verifySignedSession(cookies['__session']) : null;
+  const cookieVal = extractSessionTokenFromReq(req);
+  const rawSid = cookieVal ? verifySignedSession(cookieVal) : null;
   const isAdmin = Boolean(rawSid && activeSessions.get(rawSid)?.codeVerified);
 
   const result = submitBankTransferProof({
@@ -1499,8 +1633,23 @@ app.post('/api/payments/bank-transfer/proof', (req: Request, res: Response) => {
     isAdmin,
   });
   if (!result.ok) {
+    if (/SVG|ملف|صورة/i.test(result.error || '')) {
+      emitSecurityAlertRateLimited(`proof_sec_${ip}`, {
+        severity: 'critical',
+        title: '🚨 صد ملف مشبوه في إثبات التحويل',
+        body: `${result.error} (IP: ${ip})`,
+        url: '/owner/dashboard',
+      });
+    }
     return res.status(result.statusCode || 400).json({ success: false, error: result.error });
   }
+  emitAdminNotification({
+    category: 'payment',
+    severity: 'info',
+    title: `🏦 إثبات تحويل بنكي جديد #${result.order?.trackingNumber || ''}`,
+    body: `المرسل: ${result.order?.customerName || 'زبون'} — بانتظار المراجعة والاعتماد.`,
+    url: '/owner/dashboard',
+  });
   return res.json({ success: true, order: result.order });
 });
 
@@ -1515,6 +1664,13 @@ app.post('/api/payments/request-refund', (req: Request, res: Response) => {
   if (!result.ok) {
     return res.status(result.statusCode || 400).json({ success: false, error: result.error });
   }
+  emitAdminNotification({
+    category: 'payment',
+    severity: 'warning',
+    title: '↩️ طلب إلغاء أو استرجاع من زبون',
+    body: `رقم الطلب: ${result.refundRequest?.trackingNumber || ''} — ${result.refundRequest?.reason || ''}`,
+    url: '/owner/dashboard',
+  });
   return res.json({ success: true, refundRequest: result.refundRequest });
 });
 
@@ -1534,6 +1690,22 @@ const handleWebhookRoute = async (req: Request, res: Response) => {
     rawBodyText: (req as any).rawBodyText,
     query: req.query as Record<string, any>,
   });
+  if (result.statusCode === 403) {
+    emitSecurityAlertRateLimited(`webhook_sig_${provider}`, {
+      severity: 'critical',
+      title: `🚨 محاولة تزوير توقيع Webhook (${provider})`,
+      body: `تم رفض إشعار دفع بتوقيع غير صالح من ${getClientIp(req)}.`,
+      url: '/owner/dashboard',
+    });
+  } else if (result.ok && !result.idempotentDuplicate && /Paid/i.test(result.message || '')) {
+    emitAdminNotification({
+      category: 'payment',
+      severity: 'success',
+      title: `💳 تأكيد دفع إلكتروني (${provider})`,
+      body: `تم التحقق من دفع ناجح عبر البوابة: ${result.message || ''}`,
+      url: '/owner/dashboard',
+    });
+  }
   return res.status(result.statusCode).json(result);
 };
 
@@ -1555,6 +1727,15 @@ app.get('/api/payments/verify-return', async (req: Request, res: Response) => {
   });
   if (!result.ok) {
     return res.status(result.statusCode || 404).json({ success: false, error: result.error });
+  }
+  if (result.paymentStatus === 'Paid') {
+    emitAdminNotification({
+      category: 'payment',
+      severity: 'success',
+      title: '💳 اكتمال دفع إلكتروني من الزبون',
+      body: `الطلب/المساهمة #${result.order?.trackingNumber || result.supportTransaction?.id || ''} مدفوع ومؤكد.`,
+      url: '/owner/dashboard',
+    });
   }
   return res.json({ success: true, ...result });
 });
@@ -1582,6 +1763,15 @@ app.post('/api/support/contribute', async (req: Request, res: Response) => {
     });
     if (!result.ok) {
       return res.status(result.statusCode || 400).json({ success: false, error: result.error });
+    }
+    if (result.supportTransaction) {
+      emitAdminNotification({
+        category: 'payment',
+        severity: 'success',
+        title: '🤝 مساهمة دعم جديدة لمنصة ECHOX',
+        body: `${result.supportTransaction.supporterName || 'داعم'} — ${result.supportTransaction.amount} د.ت`,
+        url: '/owner/dashboard',
+      });
     }
     return res.json({
       success: true,
@@ -1642,6 +1832,12 @@ app.put('/api/admin/payments/config', async (req: Request, res: Response) => {
 
     if (!pinValid) {
       const fail = recordFailedAttempt('bankPinConfirm', ip, 3, 5 * 60 * 1000);
+      emitSecurityAlertRateLimited(`bank_pin_${ip}`, {
+        severity: 'critical',
+        title: '🚨 محاولة فاشلة لتعديل الحساب البنكي (IBAN)',
+        body: `إدخال PIN خاطئ عند محاولة تغيير الحساب البنكي من IP: ${ip}.`,
+        url: '/owner/dashboard',
+      });
       return res.status(403).json({
         success: false,
         requiresPinConfirmation: true,
@@ -1658,6 +1854,13 @@ app.put('/api/admin/payments/config', async (req: Request, res: Response) => {
   if (!result.ok) {
     return res.status(400).json({ success: false, error: result.error });
   }
+  emitAdminNotification({
+    category: 'activity',
+    severity: 'info',
+    title: '💳 تحديث إعدادات الدفع في غرفة التحكم',
+    body: 'تم حفظ إعدادات بوابات الدفع والتحويل البنكي والعمولات.',
+    url: '/owner/dashboard',
+  });
   return res.json({ success: true, config: result.config });
 });
 
@@ -1741,6 +1944,15 @@ app.post('/api/admin/orders', (req: Request, res: Response) => {
   if (!result.ok) {
     return res.status(result.statusCode || 400).json({ success: false, error: result.error });
   }
+  if (result.order) {
+    emitAdminNotification({
+      category: 'order',
+      severity: 'info',
+      title: `📝 إضافة طلب يدوي #${result.order.trackingNumber}`,
+      body: `${result.order.customerName} — ${result.order.totalAmount} د.ت`,
+      url: '/owner/dashboard',
+    });
+  }
   return res.json({ success: true, order: result.order });
 });
 
@@ -1795,6 +2007,13 @@ app.post('/api/chat/session/:sessionId/message', (req: Request, res: Response) =
   if (!result.ok) {
     return res.status(400).json({ success: false, error: result.error });
   }
+  emitAdminNotification({
+    category: 'support',
+    severity: 'info',
+    title: '💬 رسالة جديدة في دعم الزبائن',
+    body: `${customerLabel || 'زبون'}: ${String(customerText || '').slice(0, 120)}`,
+    url: '/owner/dashboard',
+  });
   return res.json({ success: true, thread: result.thread });
 });
 
@@ -1856,12 +2075,52 @@ app.get('/api/admin/store/state', (req: Request, res: Response) => {
 
 app.put('/api/admin/store/state', (req: Request, res: Response) => {
   if (!requireAdminAuth(req, res)) return;
+  const prevState = getPublicStoreState();
   const result = updateAdminStoreState(req.body || {});
   if (!result.ok) {
     return res.status(400).json({ success: false, error: result.error });
   }
   // Keep server-side payment catalog prices in exact sync with edited products
   syncCatalogSnapshot(result.state.products, { replaceAll: true });
+
+  const changedSections: string[] = [];
+  if (Array.isArray(req.body?.products)) changedSections.push('المنتجات');
+  if (Array.isArray(req.body?.categories)) changedSections.push('التصنيفات');
+  if (Array.isArray(req.body?.companies)) changedSections.push('الشركات');
+  if (Array.isArray(req.body?.banners)) changedSections.push('البانرات');
+  if (req.body?.siteSettings) changedSections.push('إعدادات المتجر');
+  if (req.body?.ownerSettings) changedSections.push('إعدادات المالك');
+
+  emitAdminNotification({
+    category: 'activity',
+    severity: 'info',
+    title: '⚙️ تحديث في غرفة التحكم',
+    body: changedSections.length > 0 ? `تم تحديث: ${changedSections.join('، ')}` : 'تم حفظ تعديلات المتجر.',
+    url: '/owner/dashboard',
+  });
+
+  if (Array.isArray(req.body?.products) && result.state.products.length > prevState.products.length) {
+    const newest = result.state.products.find((p) => !prevState.products.some((old) => old.id === p.id));
+    if (newest) {
+      emitPublicStoreNotification({
+        tag: 'منتج جديد',
+        title: `🆕 منتج جديد في ECHOX Store: ${newest.name.ar}`,
+        body: `متوفر الآن بسعر ${newest.price} د.ت — اطلبه الآن مع التوصيل لكافة الولايات.`,
+        url: `/?product=${encodeURIComponent(newest.id)}`,
+      });
+    }
+  } else if (Array.isArray(req.body?.banners) && result.state.banners.length > prevState.banners.length) {
+    const newestBanner = result.state.banners.find((b) => !prevState.banners.some((old) => old.id === b.id));
+    if (newestBanner && newestBanner.active) {
+      emitPublicStoreNotification({
+        tag: newestBanner.tag || 'عرض جديد',
+        title: `🔥 ${newestBanner.title}`,
+        body: newestBanner.subtitle || 'اكتشف العروض الجديدة في ECHOX Store الآن.',
+        url: '/',
+      });
+    }
+  }
+
   return res.json({
     success: true,
     ...result.state,
@@ -1878,6 +2137,13 @@ app.post('/api/store/products/:productId/reviews', (req: Request, res: Response)
   if (!result.ok) {
     return res.status(400).json({ success: false, error: result.error });
   }
+  emitAdminNotification({
+    category: 'activity',
+    severity: 'info',
+    title: `⭐ تقييم جديد (${req.body?.rating || 5}/5)`,
+    body: `المنتج: ${result.product?.name?.ar || req.params.productId} — ${req.body?.customerName || 'زبون'}`,
+    url: '/owner/dashboard',
+  });
   return res.json({ success: true, product: result.product });
 });
 
@@ -1891,6 +2157,13 @@ app.post('/api/store/inquiries', (req: Request, res: Response) => {
   if (!result.ok) {
     return res.status(400).json({ success: false, error: result.error });
   }
+  emitAdminNotification({
+    category: 'support',
+    severity: 'info',
+    title: '📩 استفسار جديد من صفحة اتصل بنا',
+    body: `${result.inquiry?.senderName || 'زبون'}: ${result.inquiry?.subject || ''}`,
+    url: '/owner/dashboard',
+  });
   return res.json({ success: true, inquiry: result.inquiry });
 });
 
@@ -1903,13 +2176,88 @@ app.post('/api/admin/store/inquiries/:inquiryId/reply', (req: Request, res: Resp
   return res.json({ success: true, inquiry: result.inquiry });
 });
 
+// ==========================================
+// 🔔 MOBILE WEB PUSH & CONTROL ROOM NOTIFICATIONS
+// ==========================================
+app.get('/api/notifications/public', (_req: Request, res: Response) => {
+  res.setHeader('Cache-Control', 'no-store');
+  return res.json({
+    success: true,
+    vapidPublicKey: getVapidPublicKey(),
+    announcements: getPublicAnnouncements(),
+  });
+});
+
+app.post('/api/notifications/public/subscribe', (req: Request, res: Response) => {
+  const result = subscribePublicPush(req.body?.subscription);
+  if (!result.ok) {
+    return res.status(400).json({ success: false, error: result.error });
+  }
+  return res.json({ success: true });
+});
+
+app.post('/api/notifications/public/unsubscribe', (req: Request, res: Response) => {
+  return res.json(unsubscribePublicPush(String(req.body?.endpoint || '')));
+});
+
+app.get('/api/admin/notifications', (req: Request, res: Response) => {
+  if (!requireAdminAuth(req, res)) return;
+  res.setHeader('Cache-Control', 'no-store');
+  const since = typeof req.query.since === 'string' ? req.query.since : undefined;
+  return res.json({
+    success: true,
+    ...getAdminNotificationsOverview(since),
+  });
+});
+
+app.post('/api/admin/notifications/subscribe', (req: Request, res: Response) => {
+  if (!requireAdminAuth(req, res)) return;
+  const result = subscribeAdminPush(req.body?.subscription, req.body?.deviceLabel);
+  if (!result.ok) {
+    return res.status(400).json({ success: false, error: result.error });
+  }
+  return res.json({ success: true, subscriptionsCount: result.subscriptionsCount });
+});
+
+app.post('/api/admin/notifications/unsubscribe', (req: Request, res: Response) => {
+  if (!requireAdminAuth(req, res)) return;
+  return res.json(unsubscribeAdminPush(String(req.body?.endpoint || '')));
+});
+
+app.put('/api/admin/notifications/settings', (req: Request, res: Response) => {
+  if (!requireAdminAuth(req, res)) return;
+  const settings = updateNotificationSettings(req.body || {});
+  return res.json({ success: true, settings });
+});
+
+app.post('/api/admin/notifications/read', (req: Request, res: Response) => {
+  if (!requireAdminAuth(req, res)) return;
+  const ids = Array.isArray(req.body?.ids) ? req.body.ids : undefined;
+  const unreadCount = markAdminNotificationsRead(ids);
+  return res.json({ success: true, unreadCount });
+});
+
+app.delete('/api/admin/notifications', (req: Request, res: Response) => {
+  if (!requireAdminAuth(req, res)) return;
+  clearAdminNotifications();
+  return res.json({ success: true });
+});
+
+app.post('/api/admin/notifications/test', async (req: Request, res: Response) => {
+  if (!requireAdminAuth(req, res)) return;
+  const result = await sendTestAdminPush(typeof req.body?.endpoint === 'string' ? req.body.endpoint : undefined);
+  return res.json({ success: true, ...result });
+});
+
 // --- PRODUCTION STATIC OR VITE DEV MIDDLEWARE ---
 async function startServer() {
   await Promise.all([
+    initHmacSecretFromCloud().catch((err) => console.error('[Security] HMAC cloud init notice:', err)),
     initCentralSecurityConfig().catch((err) => console.error('[Security] Init notice:', err)),
     hydratePaymentDbFromCloud().catch((err) => console.error('[PaymentEngine] Cloud hydrate notice:', err)),
     hydrateChatDbFromCloud().catch((err) => console.error('[ChatEngine] Cloud hydrate notice:', err)),
     hydrateStoreStateFromCloud().catch((err) => console.error('[StoreEngine] Cloud hydrate notice:', err)),
+    hydrateNotificationsFromCloud().catch((err) => console.error('[Notifications] Cloud hydrate notice:', err)),
   ]);
 
   // Synchronize authoritative payment catalog with persisted store products on startup

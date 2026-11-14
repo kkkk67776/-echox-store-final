@@ -51,7 +51,9 @@ import {
   getAuthorizedOwnerEmail, 
   setAuthorizedOwnerEmail, 
   getAuthorizedOwnerPhone, 
-  setAuthorizedOwnerPhone 
+  setAuthorizedOwnerPhone,
+  getAdminAuthHeaders,
+  notifySessionExpired
 } from '../lib/security';
 
 
@@ -416,11 +418,14 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     try {
       const res = await fetch('/api/admin/store/state', {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAdminAuthHeaders({ 'Content-Type': 'application/json' }),
         credentials: 'include',
         body: JSON.stringify(patch),
       });
       const data = await res.json().catch(() => ({}));
+      if (res.status === 401 || res.status === 403) {
+        notifySessionExpired();
+      }
       if (!res.ok || !data?.success) {
         return {
           ok: false,
@@ -654,8 +659,12 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const res = await fetch('/api/admin/store/state', {
         credentials: 'include',
         cache: 'no-store',
+        headers: getAdminAuthHeaders(),
       });
       const data = await res.json().catch(() => null);
+      if (res.status === 401 || res.status === 403) {
+        notifySessionExpired();
+      }
       if (!res.ok || !data?.success) {
         return { ok: false, error: data?.error || 'تعذر مزامنة بيانات المتجر من الخادم.' };
       }
@@ -1319,10 +1328,14 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }));
     void fetch(`/api/admin/store/inquiries/${encodeURIComponent(inquiryId)}/reply`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAdminAuthHeaders({ 'Content-Type': 'application/json' }),
       credentials: 'include',
       body: JSON.stringify({ reply }),
-    }).catch(() => {});
+    })
+      .then((res) => {
+        if (res.status === 401 || res.status === 403) notifySessionExpired();
+      })
+      .catch(() => {});
   };
 
   const [chatConfig, setChatConfig] = useState<SupportChatConfig>(DEFAULT_CHAT_CONFIG);

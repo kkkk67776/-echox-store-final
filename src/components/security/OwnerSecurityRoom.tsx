@@ -4,6 +4,8 @@ import emailjs from '@emailjs/browser';
 import {
   setOwnerUnlocked,
   setOwnerGoogleUser,
+  clearOwnerSecuritySession,
+  checkServerSession,
   OWNER_EMAIL,
   verifyPinServer,
   updatePinServer,
@@ -38,11 +40,11 @@ export default function OwnerSecurityRoom({ onUnlockSuccess, onNavigate, vaultOp
   const [attempts, setAttempts] = useState(0);
   const [lockoutTime, setLockoutTime] = useState(0);
 
-  const openModal = (changeMode = false) => {
+  const openModal = (changeMode = false, initialError = '') => {
     (window as any).__echoxVaultOpenPending = false;
     setIsModalOpen(true);
     setIsChangeMode(changeMode);
-    setError('');
+    setError(initialError);
     setSuccessMsg('');
     setPin(['', '', '', '', '', '']);
     setConfirmPin(['', '', '', '', '', '']);
@@ -55,28 +57,56 @@ export default function OwnerSecurityRoom({ onUnlockSuccess, onNavigate, vaultOp
   };
 
   useEffect(() => {
-    const encryptedSession = sessionStorage.getItem('echox_owner_session');
-    if (encryptedSession) {
-      try {
-        const parsed = JSON.parse(atob(encryptedSession));
-        if (parsed.unlocked && parsed.exp > Date.now()) {
+    let active = true;
+    const syncInitialSession = async () => {
+      const encryptedSession = sessionStorage.getItem('echox_owner_session');
+      if (encryptedSession) {
+        let localValid = false;
+        try {
+          const parsed = JSON.parse(atob(encryptedSession));
+          localValid = Boolean(parsed.unlocked && parsed.exp > Date.now());
+        } catch {
+          localValid = false;
+        }
+        if (localValid) {
+          const serverAlive = await checkServerSession();
+          if (!active) return;
+          if (serverAlive) {
+            setIsUnlocked(true);
+            setOwnerUnlocked(true);
+            setOwnerGoogleUser({
+              email: OWNER_EMAIL,
+              uid: 'sovereign_owner_uid_570',
+            });
+          } else {
+            clearOwnerSecuritySession();
+            setIsUnlocked(false);
+          }
+        } else {
+          clearOwnerSecuritySession();
+        }
+      } else {
+        const serverAlive = await checkServerSession();
+        if (!active) return;
+        if (serverAlive) {
           setIsUnlocked(true);
           setOwnerUnlocked(true);
           setOwnerGoogleUser({
             email: OWNER_EMAIL,
             uid: 'sovereign_owner_uid_570',
           });
-        } else {
-          sessionStorage.removeItem('echox_owner_session');
         }
-      } catch {
-        sessionStorage.removeItem('echox_owner_session');
       }
-    }
 
-    if ((window as any).__echoxVaultOpenPending) {
-      openModal(false);
-    }
+      if (active && (window as any).__echoxVaultOpenPending) {
+        openModal(false);
+      }
+    };
+
+    void syncInitialSession();
+    return () => {
+      active = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -108,11 +138,17 @@ export default function OwnerSecurityRoom({ onUnlockSuccess, onNavigate, vaultOp
         openModal(false);
       }
     };
+    const handleSessionExpired = () => {
+      setIsUnlocked(false);
+      openModal(false, 'انتهت جلسة الخادم (أو أُعيد تشغيل الخادم). أدخل رمز الـ PIN لتنشيط الجلسة ومتابعة التعديل.');
+    };
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('open_echox_vault', handleOpenVaultEvent);
+    window.addEventListener('echox_session_expired', handleSessionExpired);
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('open_echox_vault', handleOpenVaultEvent);
+      window.removeEventListener('echox_session_expired', handleSessionExpired);
     };
   }, [isUnlocked, onUnlockSuccess]);
 
@@ -284,6 +320,7 @@ export default function OwnerSecurityRoom({ onUnlockSuccess, onNavigate, vaultOp
       uid: 'sovereign_owner_uid_570',
     });
 
+    window.dispatchEvent(new CustomEvent('echox_session_refreshed'));
     if (onUnlockSuccess) onUnlockSuccess();
   };
 

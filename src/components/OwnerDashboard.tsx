@@ -40,13 +40,22 @@ import {
   ExternalLink,
   MessageCircle,
   RotateCcw,
-  CreditCard
+  CreditCard,
+  BellRing
 } from 'lucide-react';
 import { Product, Company, Order, OrderStatus, CategoryItem, PromoBanner, SiteSettings } from '../types';
 import { INITIAL_SITE_SETTINGS } from '../data/initialData';
 import { PaymentManagementTab } from './PaymentManagementTab';
 import { SupportChatTab } from './SupportChatTab';
+import { NotificationsCenterTab } from './NotificationsCenterTab';
 import { canOrderShipClient, getPaymentStatusTone } from '../lib/payments';
+import {
+  AdminNotificationDevice,
+  AdminNotificationEvent,
+  fetchAdminNotifications,
+  NotificationSettings,
+  showLocalNotificationFallback,
+} from '../lib/notifications';
 import { TUNISIAN_GOVERNORATES, getGovernorateName } from '../data/governorates';
 import { 
   getAuthorizedOwnerEmail, 
@@ -66,7 +75,9 @@ import {
   updatePinServer,
   fetchActiveSessions,
   revokeAllSessionsServer,
-  fetchSecuritySystemStatus
+  fetchSecuritySystemStatus,
+  getAdminAuthHeaders,
+  notifySessionExpired
 } from '../lib/security';
 
 interface OwnerDashboardProps {
@@ -75,6 +86,7 @@ interface OwnerDashboardProps {
 
 type DashboardTab = 
   | 'overview'
+  | 'notifications'
   | 'payment_management'
   | 'account_security'
   | 'footer_info'
@@ -135,6 +147,24 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
   const [ordersSyncError, setOrdersSyncError] = useState<string | null>(null);
   const [lastOrdersSyncAt, setLastOrdersSyncAt] = useState<string | null>(null);
 
+  // Notifications Center States
+  const [notifsLoading, setNotifsLoading] = useState(false);
+  const [vapidPublicKey, setVapidPublicKey] = useState('');
+  const [notifUnreadCount, setNotifUnreadCount] = useState(0);
+  const [notifEvents, setNotifEvents] = useState<AdminNotificationEvent[]>([]);
+  const [notifSubscriptionsCount, setNotifSubscriptionsCount] = useState(0);
+  const [notifSubscriptions, setNotifSubscriptions] = useState<AdminNotificationDevice[]>([]);
+  const [notifSettings, setNotifSettings] = useState<NotificationSettings>({
+    notifyOrders: true,
+    notifySecurity: true,
+    notifyActivity: true,
+    notifySupport: true,
+    notifyStorefrontVisitors: true,
+  });
+  const [liveNotifBanner, setLiveNotifBanner] = useState<AdminNotificationEvent | null>(null);
+  const knownNotifIdsRef = React.useRef<Set<string>>(new Set());
+  const notifBootstrappedRef = React.useRef(false);
+
   // Confirmation Delete Modal
   const [deleteConfirmModal, setDeleteConfirmModal] = useState<{
     isOpen: boolean;
@@ -187,6 +217,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
   const [pinError, setPinError] = useState('');
 
   const [activeSessionsList, setActiveSessionsList] = useState<Array<{ id: string; ip: string; userAgent: string; createdAt: string; isCurrent: boolean }>>([]);
+  const [sessionsUnauthorized, setSessionsUnauthorized] = useState(false);
   const [sessionsLoading, setSessionsLoading] = useState(false);
   const [sessionsMessage, setSessionsMessage] = useState('');
   const [securityStatusInfo, setSecurityStatusInfo] = useState<{ argon2idEnabled: boolean; hashingAlgorithm: string; activeSessionsCount: number; updatedAt: string } | null>(null);
@@ -253,37 +284,29 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
   const [manualAmount, setManualAmount] = useState('');
   const [manualNotes, setManualNotes] = useState('');
 
-  // Authorization Check: exclusively protected by ECHOX VAULT
+  // Authorization Check: exclusively protected by ECHOX VAULT server-side session
   useEffect(() => {
     let cancelled = false;
 
     async function guard() {
-      let unlocked = isOwnerUnlocked();
-      if (!unlocked) {
-        unlocked = await checkServerSession();
-        if (unlocked) {
-          setOwnerUnlocked(true);
-        }
-      }
+      const serverUnlocked = await checkServerSession();
+      if (cancelled) return;
 
-      if (!unlocked) {
+      if (!serverUnlocked) {
         clearOwnerSecuritySession();
-        if (!cancelled) {
-          navigate('/');
-          setTimeout(() => {
-            window.dispatchEvent(new CustomEvent('open_echox_vault'));
-          }, 50);
-        }
+        navigate('/');
+        setTimeout(() => {
+          window.dispatchEvent(new CustomEvent('echox_session_expired'));
+        }, 50);
         return;
       }
 
-      if (!cancelled) {
-        setAuthorized(true);
-        setChecking(false);
-      }
+      setOwnerUnlocked(true);
+      setAuthorized(true);
+      setChecking(false);
     }
 
-    guard();
+    void guard();
     return () => { cancelled = true; };
   }, []);
 
@@ -321,8 +344,9 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
     async function loadSessionsAndStatus() {
       try {
         const sess = await fetchActiveSessions();
-        if (active && sess && sess.sessions) {
-          setActiveSessionsList(sess.sessions);
+        if (active && sess) {
+          setSessionsUnauthorized(Boolean(sess.unauthorized));
+          if (sess.sessions) setActiveSessionsList(sess.sessions);
         }
         const stat = await fetchSecuritySystemStatus();
         if (active && stat) {
@@ -332,8 +356,19 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
         console.warn('Security info load notice:', err);
       }
     }
-    loadSessionsAndStatus();
-    return () => { active = false; };
+    void loadSessionsAndStatus();
+    const handleRefreshed = () => {
+      if (active) {
+        setSessionsUnauthorized(false);
+        void loadSessionsAndStatus();
+        void refreshAdminStoreState();
+      }
+    };
+    window.addEventListener('echox_session_refreshed', handleRefreshed);
+    return () => {
+      active = false;
+      window.removeEventListener('echox_session_refreshed', handleRefreshed);
+    };
   }, [activeTab]);
 
   // Live Sync Server Orders into Admin Room (on open, tab focus, and 20s poll)
@@ -360,6 +395,52 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
       }
     }, 20000);
     return () => window.clearInterval(timer);
+  }, [authorized, activeTab]);
+
+  // Live Control Room Notifications Sync & Polling (15s)
+  const syncAdminNotifications = async (showSpinner = false) => {
+    if (showSpinner) setNotifsLoading(true);
+    const res = await fetchAdminNotifications();
+    if (showSpinner) setNotifsLoading(false);
+    if (res.unauthorized) return;
+
+    if (res.vapidPublicKey) setVapidPublicKey(res.vapidPublicKey);
+    setNotifUnreadCount(res.unreadCount);
+    setNotifSubscriptionsCount(res.subscriptionsCount);
+    setNotifSubscriptions(res.subscriptions);
+    setNotifSettings(res.settings);
+
+    const incoming = res.events || [];
+    setNotifEvents(incoming);
+
+    if (!notifBootstrappedRef.current) {
+      incoming.forEach((ev) => knownNotifIdsRef.current.add(ev.id));
+      notifBootstrappedRef.current = true;
+    } else {
+      const freshUnread = incoming.filter((ev) => !ev.read && !knownNotifIdsRef.current.has(ev.id));
+      incoming.forEach((ev) => knownNotifIdsRef.current.add(ev.id));
+      if (freshUnread.length > 0) {
+        const newest = freshUnread[0];
+        setLiveNotifBanner(newest);
+        void showLocalNotificationFallback(newest);
+      }
+    }
+  };
+
+  useEffect(() => {
+    if (!authorized) return;
+    void syncAdminNotifications(activeTab === 'notifications');
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        void syncAdminNotifications(false);
+      }
+    }, 15000);
+    const onRefreshed = () => void syncAdminNotifications(false);
+    window.addEventListener('echox_session_refreshed', onRefreshed);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('echox_session_refreshed', onRefreshed);
+    };
   }, [authorized, activeTab]);
 
   if (checking) {
@@ -943,6 +1024,26 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
 
         <button
           type="button"
+          onClick={() => setActiveTab('notifications')}
+          className={`px-4 py-2 rounded-full text-xs font-bold shrink-0 transition-all cursor-pointer flex items-center gap-1.5 active:scale-95 ${
+            activeTab === 'notifications'
+              ? 'bg-[#FF6B00] text-white shadow-xs'
+              : 'bg-[#F8FAFC] dark:bg-[#1E293B] text-slate-700 dark:text-slate-200 border border-[#E2E8F0] dark:border-slate-800 hover:border-slate-400'
+          }`}
+        >
+          <BellRing className="w-3.5 h-3.5" />
+          <span>الإشعارات والتنبيهات</span>
+          {notifUnreadCount > 0 && (
+            <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-black font-mono ${
+              activeTab === 'notifications' ? 'bg-white text-[#FF6B00]' : 'bg-red-600 text-white'
+            }`}>
+              {notifUnreadCount}
+            </span>
+          )}
+        </button>
+
+        <button
+          type="button"
           onClick={() => setActiveTab('payment_management')}
           className={`px-4 py-2 rounded-full text-xs font-bold shrink-0 transition-all cursor-pointer flex items-center gap-1.5 active:scale-95 ${
             activeTab === 'payment_management'
@@ -1059,6 +1160,45 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
         </button>
       </div>
 
+      {/* Live Incoming Control Room Alert Banner */}
+      {liveNotifBanner && (
+        <div
+          className={`p-3.5 rounded-2xl border flex items-center justify-between gap-3 text-xs font-bold shadow-xs ${
+            liveNotifBanner.severity === 'critical'
+              ? 'bg-red-50 dark:bg-red-950/30 border-red-300 dark:border-red-500/40 text-red-800 dark:text-red-300'
+              : 'bg-[#FF6B00]/10 border-[#FF6B00]/30 text-[#0F172A] dark:text-white'
+          }`}
+        >
+          <div className="flex items-center gap-2.5">
+            <BellRing className="w-4 h-4 text-[#FF6B00] shrink-0" />
+            <div>
+              <div className="font-black">{liveNotifBanner.title}</div>
+              <div className="text-[11px] opacity-85">{liveNotifBanner.body}</div>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTab('notifications');
+                setLiveNotifBanner(null);
+              }}
+              className="px-3 py-1.5 rounded-xl bg-[#FF6B00] text-white text-[11px] font-bold cursor-pointer"
+            >
+              عرض التنبيهات
+            </button>
+            <button
+              type="button"
+              onClick={() => setLiveNotifBanner(null)}
+              className="p-1 rounded-lg hover:bg-black/5 dark:hover:bg-white/10 cursor-pointer"
+              aria-label="Dismiss notification banner"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* ========================================================= */}
       {/* 4. Tab Content Router */}
       {/* ========================================================= */}
@@ -1152,9 +1292,41 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
                 <span className="text-xs font-bold block">{t.payments.sectionTitle}</span>
                 <span className="text-[10px] text-slate-400">البنك، البوابات، البائعين</span>
               </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveTab('notifications')}
+                className="p-3 bg-white dark:bg-[#0F172A] rounded-2xl border border-[#E2E8F0] dark:border-slate-700 hover:border-[#FF6B00] text-start transition-all cursor-pointer"
+              >
+                <BellRing className="w-5 h-5 text-[#FF6B00] mb-1.5" />
+                <span className="text-xs font-bold block">
+                  إشعارات الهاتف والتنبيهات {notifUnreadCount > 0 ? `(${notifUnreadCount})` : ''}
+                </span>
+                <span className="text-[10px] text-slate-400">الطلبات، الاختراق، نشاط التحكم</span>
+              </button>
             </div>
           </div>
         </div>
+      )}
+
+      {/* Tab 1.2: Control Room Mobile Notifications Center */}
+      {activeTab === 'notifications' && (
+        <NotificationsCenterTab
+          vapidPublicKey={vapidPublicKey}
+          unreadCount={notifUnreadCount}
+          events={notifEvents}
+          subscriptionsCount={notifSubscriptionsCount}
+          subscriptions={notifSubscriptions}
+          settings={notifSettings}
+          loading={notifsLoading}
+          onRefresh={() => syncAdminNotifications(true)}
+          onEventsUpdated={(patch) => {
+            if (patch.events !== undefined) setNotifEvents(patch.events);
+            if (patch.unreadCount !== undefined) setNotifUnreadCount(patch.unreadCount);
+            if (patch.settings !== undefined) setNotifSettings(patch.settings);
+            if (patch.subscriptionsCount !== undefined) setNotifSubscriptionsCount(patch.subscriptionsCount);
+          }}
+        />
       )}
 
       {/* Tab 1.5: Comprehensive Payment Management Center */}
@@ -1559,6 +1731,19 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
                     </span>
                   </div>
                 ))
+              ) : sessionsUnauthorized ? (
+                <div className="p-4 rounded-2xl bg-red-500/10 border border-red-500/30 text-center space-y-2.5">
+                  <p className="text-xs font-bold text-red-600">
+                    جلسة الخادم منتهية أو أُعيد تشغيل الخادم — يلزم تأكيد رمز الـ PIN لتنشيط الحفظ والتعديل.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => notifySessionExpired()}
+                    className="px-4 py-2 rounded-xl bg-[#FF6B00] hover:bg-[#EA580C] text-white text-xs font-bold cursor-pointer transition active:scale-95"
+                  >
+                    تأكيد رمز الـ PIN وتجديد الجلسة الآن
+                  </button>
+                </div>
               ) : (
                 <div className="p-4 rounded-2xl bg-white dark:bg-[#0F172A] border border-slate-200 dark:border-slate-700 text-center text-xs text-slate-400">
                   جلسة المتصفح الحالية نشطة ومؤمنة بتوقيع خادمي مشفر.
@@ -2628,7 +2813,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
                         try {
                           const srvRes = await fetch(`/api/admin/orders/${encodeURIComponent(o.id)}/status`, {
                             method: 'PATCH',
-                            headers: { 'Content-Type': 'application/json' },
+                            headers: getAdminAuthHeaders({ 'Content-Type': 'application/json' }),
                             credentials: 'include',
                             body: JSON.stringify({ status: targetStatus }),
                           });
@@ -2636,7 +2821,8 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onNavigate }) =>
                             const errData = await srvRes.json().catch(() => ({}));
                             setOrderStatusError(errData.error || t.payments.shippingBlockedUnpaid);
                           } else if (srvRes.status === 401 || srvRes.status === 403) {
-                            setOrderStatusError('انتهت جلسة الأمان على الخادم — يرجى إعادة تسجيل الدخول لحفظ التعديلات.');
+                            notifySessionExpired();
+                            setOrderStatusError('انتهت جلسة الأمان على الخادم — يرجى إدخال رمز الـ PIN لتجديد الجلسة.');
                           } else if (srvRes.ok) {
                             const okData = await srvRes.json().catch(() => ({}));
                             if (okData?.order) updateOrderInState(okData.order);

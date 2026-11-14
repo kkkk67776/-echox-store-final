@@ -109,13 +109,36 @@ export function setOwnerUnlocked(unlocked: boolean) {
   }
 }
 
+let activeMemorySessionToken: string | null = null;
+
+export function setMemorySessionToken(token: string | null) {
+  activeMemorySessionToken = token && token.trim() ? token.trim() : null;
+}
+
+export function getAdminAuthHeaders(extra: Record<string, string> = {}): Record<string, string> {
+  const headers: Record<string, string> = { ...extra };
+  if (activeMemorySessionToken) {
+    headers['Authorization'] = `Bearer ${activeMemorySessionToken}`;
+  }
+  return headers;
+}
+
 export function clearOwnerSecuritySession() {
+  activeMemorySessionToken = null;
   sessionStorage.removeItem(GOOGLE_USER_KEY);
   sessionStorage.removeItem(CUSTOM_CLAIMS_KEY);
   sessionStorage.removeItem(OWNER_UNLOCKED_KEY);
   sessionStorage.removeItem('echox_owner_code_verified');
+  sessionStorage.removeItem('echox_owner_session');
   if (window.confirmationResult) {
     delete window.confirmationResult;
+  }
+}
+
+export function notifySessionExpired() {
+  clearOwnerSecuritySession();
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('echox_session_expired'));
   }
 }
 
@@ -374,7 +397,18 @@ export async function createOwnerSessionCall(email: string, customToken?: string
 
 export async function checkServerSession() {
   try {
-    const res = await fetch('/api/owner/me', { credentials: 'same-origin', cache: 'no-store' });
+    const send = () =>
+      fetch('/api/owner/me', {
+        credentials: 'same-origin',
+        cache: 'no-store',
+        headers: getAdminAuthHeaders()
+      });
+
+    let res = await send();
+    if (res.status === 502 || res.status === 503 || res.status === 504) {
+      await new Promise((resolve) => setTimeout(resolve, 2500));
+      res = await send();
+    }
     if (!res.ok) return false;
     const data = await res.json();
     return data.authenticated === true && data.owner === true && data.codeVerified === true;
@@ -422,6 +456,28 @@ async function safeReadJson(res: Response): Promise<any> {
   }
 }
 
+async function fetchSecurityPostWithWakeRetry(
+  url: string,
+  payload: Record<string, unknown>
+): Promise<{ res: Response; data: any }> {
+  const send = () =>
+    fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      cache: 'no-store',
+      body: JSON.stringify(payload)
+    });
+
+  let res = await send();
+  if (res.status === 502 || res.status === 503 || res.status === 504) {
+    await new Promise((resolve) => setTimeout(resolve, 2500));
+    res = await send();
+  }
+  const data = await safeReadJson(res);
+  return { res, data };
+}
+
 export async function verifyAccessCodeServer(code: string): Promise<{
   success: boolean;
   lockedOut?: boolean;
@@ -431,21 +487,16 @@ export async function verifyAccessCodeServer(code: string): Promise<{
   error?: string;
 }> {
   try {
-    const res = await fetch('/api/security/verifyAccessCode', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'same-origin',
-      cache: 'no-store',
-      body: JSON.stringify({ code: code.trim() })
+    const { res, data } = await fetchSecurityPostWithWakeRetry('/api/security/verifyAccessCode', {
+      code: code.trim()
     });
-    const data = await safeReadJson(res);
     if (res.status === 503) {
       return {
         success: false,
         httpStatus: 503,
         error:
           data.error ||
-          'خدمة التحقق الخادمية غير مربوطة في بيئة النشر (BACKEND_ORIGIN غير مضبوط في إعدادات Cloudflare Pages).'
+          'الخادم الخلفي في وضع الاستيقاظ الآن، يرجى الانتظار 15 ثانية ثم إعادة المحاولة.'
       };
     }
     if (res.status >= 500) {
@@ -476,21 +527,16 @@ export async function verifyPinServer(pin: string): Promise<{
   error?: string;
 }> {
   try {
-    const res = await fetch('/api/security/verifyPin', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'same-origin',
-      cache: 'no-store',
-      body: JSON.stringify({ pin: pin.trim() })
+    const { res, data } = await fetchSecurityPostWithWakeRetry('/api/security/verifyPin', {
+      pin: pin.trim()
     });
-    const data = await safeReadJson(res);
     if (res.status === 503) {
       return {
         success: false,
         httpStatus: 503,
         error:
           data.error ||
-          'خدمة التحقق الخادمية غير مربوطة في بيئة النشر (BACKEND_ORIGIN غير مضبوط في إعدادات Cloudflare Pages).'
+          'الخادم الخلفي في وضع الاستيقاظ الآن، يرجى الانتظار 15 ثانية ثم إعادة المحاولة.'
       };
     }
     if (res.status >= 500) {
@@ -502,6 +548,9 @@ export async function verifyPinServer(pin: string): Promise<{
     }
     if (data.success) {
       setOwnerUnlocked(true);
+      if (typeof data.sessionToken === 'string' && data.sessionToken) {
+        setMemorySessionToken(data.sessionToken);
+      }
     }
     return {
       ...data,
@@ -516,17 +565,26 @@ export async function verifyPinServer(pin: string): Promise<{
 
 export async function updateAccessCodeServer(currentPinOrCode: string, newCode: string): Promise<{
   success: boolean;
+  unauthorized?: boolean;
   message?: string;
   error?: string;
 }> {
   try {
     const res = await fetch('/api/security/updateAccessCode', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAdminAuthHeaders({ 'Content-Type': 'application/json' }),
       credentials: 'same-origin',
       body: JSON.stringify({ currentPinOrCode, newCode })
     });
-    const data = await res.json();
+    const data = await safeReadJson(res);
+    if (res.status === 401 || res.status === 403) {
+      notifySessionExpired();
+      return {
+        success: false,
+        unauthorized: true,
+        error: data.error || 'وصول مرفوض: جلسة مركز التحكم مطلوبة أو منتهية.'
+      };
+    }
     return data;
   } catch {
     return { success: false, error: 'تعذر تحديث رمز الوصول على الخادم.' };
@@ -535,17 +593,26 @@ export async function updateAccessCodeServer(currentPinOrCode: string, newCode: 
 
 export async function updatePinServer(currentPin: string, newPin: string): Promise<{
   success: boolean;
+  unauthorized?: boolean;
   message?: string;
   error?: string;
 }> {
   try {
     const res = await fetch('/api/security/updatePin', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAdminAuthHeaders({ 'Content-Type': 'application/json' }),
       credentials: 'same-origin',
       body: JSON.stringify({ currentPin, newPin })
     });
-    const data = await res.json();
+    const data = await safeReadJson(res);
+    if (res.status === 401 || res.status === 403) {
+      notifySessionExpired();
+      return {
+        success: false,
+        unauthorized: true,
+        error: data.error || 'وصول مرفوض: جلسة مركز التحكم مطلوبة أو منتهية.'
+      };
+    }
     return data;
   } catch {
     return { success: false, error: 'تعذر تحديث رمز الـ PIN على الخادم.' };
@@ -555,9 +622,17 @@ export async function updatePinServer(currentPin: string, newPin: string): Promi
 export async function fetchActiveSessions(): Promise<{
   sessions: Array<{ id: string; ip: string; userAgent: string; createdAt: string; isCurrent: boolean }>;
   securityEngine: string;
+  unauthorized?: boolean;
 }> {
   try {
-    const res = await fetch('/api/security/sessions', { credentials: 'same-origin' });
+    const res = await fetch('/api/security/sessions', {
+      credentials: 'same-origin',
+      cache: 'no-store',
+      headers: getAdminAuthHeaders()
+    });
+    if (res.status === 401 || res.status === 403) {
+      return { sessions: [], securityEngine: 'Argon2id', unauthorized: true };
+    }
     if (res.ok) {
       return await res.json();
     }
@@ -565,13 +640,20 @@ export async function fetchActiveSessions(): Promise<{
   return { sessions: [], securityEngine: 'Argon2id' };
 }
 
-export async function revokeAllSessionsServer(): Promise<{ success: boolean; message: string }> {
+export async function revokeAllSessionsServer(): Promise<{ success: boolean; unauthorized?: boolean; message: string }> {
   try {
     const res = await fetch('/api/security/logoutAllDevices', {
       method: 'POST',
-      credentials: 'same-origin'
+      credentials: 'same-origin',
+      headers: getAdminAuthHeaders()
     });
-    return await res.json();
+    const data = await safeReadJson(res);
+    if (res.status === 401 || res.status === 403) {
+      notifySessionExpired();
+      return { success: false, unauthorized: true, message: data.error || 'انتهت صلاحية الجلسة.' };
+    }
+    clearOwnerSecuritySession();
+    return data;
   } catch {
     return { success: false, message: 'فشل إنهاء الجلسات.' };
   }

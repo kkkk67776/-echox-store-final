@@ -12,6 +12,7 @@ import type {
   VendorLedgerEntry,
   VendorSubOrder,
 } from '../types';
+import { getAdminAuthHeaders, notifySessionExpired } from './security';
 
 export interface AdminPaymentOverviewResponse {
   config: PaymentSystemPublicConfig;
@@ -266,15 +267,25 @@ export async function fetchScopedVendorFinancials(vendorId: string): Promise<Sco
 // ==========================================
 
 export async function fetchAdminPaymentOverview(): Promise<AdminPaymentOverviewResponse> {
-  const res = await fetch('/api/admin/payments/overview', { credentials: 'include', cache: 'no-store' });
+  const res = await fetch('/api/admin/payments/overview', {
+    credentials: 'include',
+    cache: 'no-store',
+    headers: getAdminAuthHeaders(),
+  });
   const data = await res.json().catch(() => ({}));
+  if (res.status === 401 || res.status === 403) notifySessionExpired();
   if (!res.ok) throw new Error(data.error || 'Unauthorized');
   return data;
 }
 
 export async function fetchAdminOrders(): Promise<Order[]> {
-  const res = await fetch('/api/admin/orders', { credentials: 'include', cache: 'no-store' });
+  const res = await fetch('/api/admin/orders', {
+    credentials: 'include',
+    cache: 'no-store',
+    headers: getAdminAuthHeaders(),
+  });
   const data = await res.json().catch(() => ({}));
+  if (res.status === 401 || res.status === 403) notifySessionExpired();
   if (!res.ok) throw new Error(data.error || 'Unauthorized');
   return Array.isArray(data.orders) ? data.orders : [];
 }
@@ -282,11 +293,12 @@ export async function fetchAdminOrders(): Promise<Order[]> {
 export async function createAdminManualOrderServer(payload: Partial<Order>): Promise<{ ok: boolean; order?: Order; error?: string }> {
   const res = await fetch('/api/admin/orders', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: getAdminAuthHeaders({ 'Content-Type': 'application/json' }),
     credentials: 'include',
     body: JSON.stringify(payload),
   });
   const data = await res.json().catch(() => ({}));
+  if (res.status === 401 || res.status === 403) notifySessionExpired();
   if (!res.ok || !data.success) {
     return { ok: false, error: data.error || 'Failed to save manual order' };
   }
@@ -297,8 +309,10 @@ export async function deleteAdminOrderServer(orderId: string): Promise<{ ok: boo
   const res = await fetch(`/api/admin/orders/${encodeURIComponent(orderId)}`, {
     method: 'DELETE',
     credentials: 'include',
+    headers: getAdminAuthHeaders(),
   });
   const data = await res.json().catch(() => ({}));
+  if (res.status === 401 || res.status === 403) notifySessionExpired();
   if (!res.ok || !data.success) {
     return { ok: false, error: data.error || 'Failed to delete order' };
   }
@@ -308,11 +322,12 @@ export async function deleteAdminOrderServer(orderId: string): Promise<{ ok: boo
 export async function saveAdminPaymentConfig(payload: any): Promise<{ ok: boolean; config?: PaymentSystemPublicConfig; error?: string }> {
   const res = await fetch('/api/admin/payments/config', {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
+    headers: getAdminAuthHeaders({ 'Content-Type': 'application/json' }),
     credentials: 'include',
     body: JSON.stringify(payload),
   });
   const data = await res.json().catch(() => ({}));
+  if (res.status === 401 || res.status === 403) notifySessionExpired();
   if (!res.ok || !data.success) {
     return { ok: false, error: data.error || 'Failed to save payment config' };
   }
@@ -323,7 +338,9 @@ export async function testAdminOnlineGateway(): Promise<{ ok: boolean; message: 
   const res = await fetch('/api/admin/payments/test-gateway', {
     method: 'POST',
     credentials: 'include',
+    headers: getAdminAuthHeaders(),
   });
+  if (res.status === 401 || res.status === 403) notifySessionExpired();
   return res.json();
 }
 
@@ -335,11 +352,12 @@ export async function verifyAdminPaymentAction(payload: {
 }): Promise<{ ok: boolean; order?: Order; transaction?: PaymentTransaction; error?: string }> {
   const res = await fetch('/api/admin/payments/verify', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: getAdminAuthHeaders({ 'Content-Type': 'application/json' }),
     credentials: 'include',
     body: JSON.stringify(payload),
   });
   const data = await res.json().catch(() => ({}));
+  if (res.status === 401 || res.status === 403) notifySessionExpired();
   if (!res.ok || !data.success) {
     return { ok: false, error: data.error || 'Verification failed' };
   }
@@ -353,11 +371,12 @@ export async function processAdminRefundOrCancel(payload: {
 }): Promise<{ ok: boolean; order?: Order; error?: string }> {
   const res = await fetch('/api/admin/payments/refund', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: getAdminAuthHeaders({ 'Content-Type': 'application/json' }),
     credentials: 'include',
     body: JSON.stringify(payload),
   });
   const data = await res.json().catch(() => ({}));
+  if (res.status === 401 || res.status === 403) notifySessionExpired();
   if (!res.ok || !data.success) {
     return { ok: false, error: data.error || 'Refund/cancellation failed' };
   }
@@ -372,11 +391,12 @@ export async function settleAdminVendorPayout(vendorId: string, settlementNote?:
 }> {
   const res = await fetch('/api/admin/payments/vendor-payout', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: getAdminAuthHeaders({ 'Content-Type': 'application/json' }),
     credentials: 'include',
     body: JSON.stringify({ vendorId, settlementNote }),
   });
   const data = await res.json().catch(() => ({}));
+  if (res.status === 401 || res.status === 403) notifySessionExpired();
   if (!res.ok || !data.success) {
     return { ok: false, error: data.error || 'Payout settlement failed' };
   }
@@ -390,11 +410,12 @@ export async function verifyAdminSupportTransaction(id: string, action: 'approve
 }> {
   const res = await fetch('/api/admin/support/verify', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: getAdminAuthHeaders({ 'Content-Type': 'application/json' }),
     credentials: 'include',
     body: JSON.stringify({ id, action }),
   });
   const data = await res.json().catch(() => ({}));
+  if (res.status === 401 || res.status === 403) notifySessionExpired();
   if (!res.ok || !data.success) {
     return { ok: false, error: data.error || 'Support verification failed' };
   }
@@ -407,7 +428,7 @@ export async function syncAdminCatalogToPaymentEngine(
   try {
     await fetch('/api/admin/payments/catalog-sync', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAdminAuthHeaders({ 'Content-Type': 'application/json' }),
       credentials: 'include',
       body: JSON.stringify({ products }),
     });

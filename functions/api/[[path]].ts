@@ -55,6 +55,13 @@ export async function onRequest(context: ApiProxyContext): Promise<Response> {
   headers.delete('host');
 
   const isIdempotentRead = context.request.method === 'GET' || context.request.method === 'HEAD';
+  const isRetryableVerifyPost =
+    context.request.method === 'POST' &&
+    (incomingUrl.pathname === '/api/security/verifyAccessCode' ||
+      incomingUrl.pathname === '/api/security/verifyPin' ||
+      incomingUrl.pathname === '/api/payments/verify-return' ||
+      incomingUrl.pathname === '/api/orders/track');
+  const canRetryUpstream = isIdempotentRead || isRetryableVerifyPost;
   const bodyBuffer = !isIdempotentRead ? await context.request.arrayBuffer() : undefined;
 
   const buildInit = (): RequestInit => {
@@ -64,18 +71,41 @@ export async function onRequest(context: ApiProxyContext): Promise<Response> {
       redirect: 'manual',
     };
     if (bodyBuffer) {
-      init.body = bodyBuffer;
+      init.body = bodyBuffer.slice(0);
     }
     return init;
   };
 
+  const isColdStartStatus = (status: number) => status === 502 || status === 503 || status === 504;
+
   try {
     let upstream = await fetch(targetUrl, buildInit());
 
-    // Render Free Plan cold-start resilience: retry idempotent GET/HEAD once after brief wake-up pause
-    if (isIdempotentRead && (upstream.status === 502 || upstream.status === 503 || upstream.status === 504)) {
-      await new Promise((resolve) => setTimeout(resolve, 1500));
-      upstream = await fetch(targetUrl, buildInit());
+    // Render Free Plan cold-start resilience: wait and retry up to 2 times for wake-up
+    if (canRetryUpstream && isColdStartStatus(upstream.status)) {
+      for (const waitMs of [2000, 3000]) {
+        await new Promise((resolve) => setTimeout(resolve, waitMs));
+        upstream = await fetch(targetUrl, buildInit());
+        if (!isColdStartStatus(upstream.status)) break;
+      }
+    }
+
+    const contentType = upstream.headers.get('content-type') || '';
+    if (isColdStartStatus(upstream.status) && !contentType.includes('application/json')) {
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error: 'الخادم الخلفي يستيقظ الآن من وضع السكون (Render)، يرجى الانتظار 15-25 ثانية ثم المحاولة مجدداً.',
+        }),
+        {
+          status: 503,
+          headers: {
+            'Content-Type': 'application/json; charset=utf-8',
+            'Cache-Control': 'no-store',
+            'X-Robots-Tag': 'noindex, nofollow',
+          },
+        }
+      );
     }
 
     const responseHeaders = new Headers(upstream.headers);
@@ -88,18 +118,21 @@ export async function onRequest(context: ApiProxyContext): Promise<Response> {
       headers: responseHeaders,
     });
   } catch (err) {
-    if (isIdempotentRead) {
+    if (canRetryUpstream) {
       try {
-        await new Promise((resolve) => setTimeout(resolve, 1500));
+        await new Promise((resolve) => setTimeout(resolve, 2500));
         const retryUpstream = await fetch(targetUrl, buildInit());
-        const responseHeaders = new Headers(retryUpstream.headers);
-        responseHeaders.set('X-Robots-Tag', 'noindex, nofollow');
-        responseHeaders.set('Cache-Control', 'no-store');
-        return new Response(retryUpstream.body, {
-          status: retryUpstream.status,
-          statusText: retryUpstream.statusText,
-          headers: responseHeaders,
-        });
+        const retryType = retryUpstream.headers.get('content-type') || '';
+        if (!isColdStartStatus(retryUpstream.status) || retryType.includes('application/json')) {
+          const responseHeaders = new Headers(retryUpstream.headers);
+          responseHeaders.set('X-Robots-Tag', 'noindex, nofollow');
+          responseHeaders.set('Cache-Control', 'no-store');
+          return new Response(retryUpstream.body, {
+            status: retryUpstream.status,
+            statusText: retryUpstream.statusText,
+            headers: responseHeaders,
+          });
+        }
       } catch {
         // fall through to 502
       }
@@ -108,7 +141,7 @@ export async function onRequest(context: ApiProxyContext): Promise<Response> {
     return new Response(
       JSON.stringify({
         success: false,
-        error: 'تعذر الاتصال بالخادم الخلفي حالياً، قد يكون في وضع الاستيقاظ. يرجى المحاولة بعد لحظات.',
+        error: 'الخادم الخلفي يستيقظ الآن من وضع السكون (Render)، يرجى الانتظار 15-25 ثانية ثم المحاولة مجدداً.',
         detail: (err as Error)?.message || 'Upstream unavailable',
       }),
       {

@@ -100,6 +100,32 @@ const AppContent: React.FC = () => {
     return () => window.removeEventListener('open_echox_vault', handleGlobalVaultEvent);
   }, []);
 
+  useEffect(() => {
+    if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return;
+    const onSwMessage = (event: MessageEvent) => {
+      const payload = event.data;
+      if (!payload || payload.type !== 'ECHOX_NOTIFICATION_CLICK' || typeof payload.url !== 'string') return;
+      try {
+        const parsed = new URL(payload.url, window.location.origin);
+        const path = parsed.pathname.replace(/\/+$/, '') || '/';
+        const productParam = parsed.searchParams.get('product');
+        if (productParam) {
+          setSelectedProductId(productParam);
+        }
+        window.history.pushState({}, '', `${parsed.pathname}${parsed.search}`);
+        if (path === '/owner/dashboard' || path === '/owner_dashboard') {
+          setCurrentView('/owner/dashboard');
+        } else {
+          setCurrentView('store');
+        }
+      } catch {
+        // ignore invalid url
+      }
+    };
+    navigator.serviceWorker.addEventListener('message', onSwMessage);
+    return () => navigator.serviceWorker.removeEventListener('message', onSwMessage);
+  }, [setCurrentView, setSelectedProductId]);
+
   // Synchronize route & query parameters (?product, ?category, ?lang, ?search) with browser URL
   useEffect(() => {
     const syncRouteFromUrl = () => {

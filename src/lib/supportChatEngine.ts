@@ -11,6 +11,7 @@ import type {
   SupportChatThread,
 } from '../types';
 import { getTranslation } from '../data/translations';
+import { getAdminAuthHeaders, notifySessionExpired } from './security';
 
 export const DEFAULT_CHAT_CONFIG: SupportChatConfig = {
   autoReplyEnabled: true,
@@ -488,8 +489,13 @@ export async function fetchAdminChatOverview(): Promise<{
   error?: string;
 }> {
   try {
-    const res = await fetch('/api/admin/chat/threads', { credentials: 'include' });
+    const res = await fetch('/api/admin/chat/threads', {
+      credentials: 'include',
+      cache: 'no-store',
+      headers: getAdminAuthHeaders(),
+    });
     const data = await res.json().catch(() => ({}));
+    if (res.status === 401 || res.status === 403) notifySessionExpired();
     if (!res.ok) {
       return {
         ok: false,
@@ -523,11 +529,12 @@ export async function sendAdminChatReplyServer(
   try {
     const res = await fetch(`/api/admin/chat/threads/${encodeURIComponent(sessionId)}/reply`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAdminAuthHeaders({ 'Content-Type': 'application/json' }),
       credentials: 'include',
       body: JSON.stringify({ replyText }),
     });
     const data = await res.json().catch(() => ({}));
+    if (res.status === 401 || res.status === 403) notifySessionExpired();
     if (!res.ok) return { ok: false, error: data?.error || 'فشل إرسال الرد.' };
     return { ok: true, thread: data.thread };
   } catch {
@@ -540,6 +547,7 @@ export async function markAdminThreadReadServer(sessionId: string): Promise<void
     await fetch(`/api/admin/chat/threads/${encodeURIComponent(sessionId)}/read`, {
       method: 'POST',
       credentials: 'include',
+      headers: getAdminAuthHeaders(),
     });
   } catch {
     // ignore
@@ -551,7 +559,9 @@ export async function deleteAdminChatThreadServer(sessionId: string): Promise<bo
     const res = await fetch(`/api/admin/chat/threads/${encodeURIComponent(sessionId)}`, {
       method: 'DELETE',
       credentials: 'include',
+      headers: getAdminAuthHeaders(),
     });
+    if (res.status === 401 || res.status === 403) notifySessionExpired();
     return res.ok;
   } catch {
     return false;
@@ -564,11 +574,12 @@ export async function saveAdminChatConfigServer(
   try {
     const res = await fetch('/api/admin/chat/config', {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAdminAuthHeaders({ 'Content-Type': 'application/json' }),
       credentials: 'include',
       body: JSON.stringify(payload),
     });
     const data = await res.json().catch(() => ({}));
+    if (res.status === 401 || res.status === 403) notifySessionExpired();
     if (!res.ok) return { ok: false, error: data?.error || 'تعذر حفظ إعدادات الشات.' };
     return { ok: true, config: data.config };
   } catch {

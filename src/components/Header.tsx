@@ -1,7 +1,19 @@
-import React, { useState } from 'react';
-import { Menu, X, ShoppingBag, Bell, CheckCircle2, Sparkles, Sun, Moon, HeartHandshake } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { Menu, X, ShoppingBag, Bell, BellRing, BellOff, CheckCircle2, Sparkles, Sun, Moon, HeartHandshake, Download, Smartphone } from 'lucide-react';
 import { useStore } from '../context/StoreContext';
 import { Product } from '../types';
+import {
+  fetchPublicNotifications,
+  getDeferredInstallPrompt,
+  getExistingPushSubscription,
+  getSavedPublicEndpoint,
+  isIosDevice,
+  isStandalonePWA,
+  PublicStoreAnnouncement,
+  subscribePublicPushClient,
+  triggerPwaInstallPrompt,
+  unsubscribePublicPushClient,
+} from '../lib/notifications';
 
 interface HeaderProps {
   onOpenVault?: () => void;
@@ -16,6 +28,7 @@ export default function Header(_props: HeaderProps) {
     t, 
     currentView, 
     setCurrentView, 
+    setSelectedProductId,
     cart, 
     setIsCartOpen, 
     wishlist, 
@@ -30,6 +43,77 @@ export default function Header(_props: HeaderProps) {
 
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+  const [announcements, setAnnouncements] = useState<PublicStoreAnnouncement[]>([]);
+  const [isPushEnabled, setIsPushEnabled] = useState(false);
+  const [pushBusy, setPushBusy] = useState(false);
+  const [pushFeedback, setPushFeedback] = useState<string | null>(null);
+  const [canInstallPwa, setCanInstallPwa] = useState(false);
+  const [showIosInstallTip, setShowIosInstallTip] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    void fetchPublicNotifications().then((res) => {
+      if (active) setAnnouncements(res.announcements || []);
+    });
+    void getExistingPushSubscription().then((sub) => {
+      if (active && sub && getSavedPublicEndpoint() && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+        setIsPushEnabled(true);
+      }
+    });
+
+    const refreshInstallState = () => {
+      if (!active) return;
+      setCanInstallPwa(!isStandalonePWA() && (Boolean(getDeferredInstallPrompt()) || isIosDevice()));
+    };
+    refreshInstallState();
+    window.addEventListener('echox_pwa_install_ready', refreshInstallState);
+    window.addEventListener('echox_pwa_installed', refreshInstallState);
+    return () => {
+      active = false;
+      window.removeEventListener('echox_pwa_install_ready', refreshInstallState);
+      window.removeEventListener('echox_pwa_installed', refreshInstallState);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isNotificationsOpen) return;
+    let active = true;
+    void fetchPublicNotifications().then((res) => {
+      if (active) setAnnouncements(res.announcements || []);
+    });
+    return () => { active = false; };
+  }, [isNotificationsOpen]);
+
+  const handleToggleStorePush = async () => {
+    setPushBusy(true);
+    setPushFeedback(null);
+    if (isPushEnabled) {
+      await unsubscribePublicPushClient();
+      setIsPushEnabled(false);
+      setPushFeedback('تم إيقاف إشعارات المتجر على هذا الجهاز.');
+    } else {
+      const res = await subscribePublicPushClient();
+      if (res.ok) {
+        setIsPushEnabled(true);
+        setPushFeedback('تم تفعيل إشعارات المتجر على هاتفك بنجاح ✓');
+      } else {
+        setPushFeedback(res.error || 'تعذر تفعيل الإشعارات.');
+      }
+    }
+    setPushBusy(false);
+  };
+
+  const handleInstallPwa = async () => {
+    if (getDeferredInstallPrompt()) {
+      const outcome = await triggerPwaInstallPrompt();
+      if (outcome === 'accepted') {
+        setCanInstallPwa(false);
+        setIsMenuOpen(false);
+      }
+    } else if (isIosDevice()) {
+      setShowIosInstallTip((prev) => !prev);
+    }
+  };
 
   const totalCartItems = cart.reduce((sum, item) => sum + item.quantity, 0);
 
@@ -158,14 +242,85 @@ export default function Header(_props: HeaderProps) {
 
           {/* نافذة الإشعارات المنسدلة */}
           {isNotificationsOpen && (
-            <div className="absolute top-full left-0 mt-2 w-72 bg-white dark:bg-[#0F172A] rounded-2xl border border-[#E2E8F0] dark:border-slate-800 shadow-xl p-3 z-50 animate-scaleUp">
+            <div className="absolute top-full left-0 mt-2 w-80 max-w-[90vw] bg-white dark:bg-[#0F172A] rounded-2xl border border-[#E2E8F0] dark:border-slate-800 shadow-xl p-3 z-50 animate-scaleUp">
               <div className="flex items-center justify-between pb-2 border-b border-[#E2E8F0] dark:border-slate-800 mb-2">
-                <span className="text-xs font-black text-[#0F172A] dark:text-white">{t.header?.notifications || 'إشعارات ECHOX Store'}</span>
-                <button onClick={() => setIsNotificationsOpen(false)} className="text-slate-400 hover:text-[#0F172A] dark:hover:text-white cursor-pointer">
+                <span className="text-xs font-black text-[#0F172A] dark:text-white flex items-center gap-1.5">
+                  <BellRing className="w-3.5 h-3.5 text-[#FF6B00]" />
+                  <span>{t.header?.notifications || 'إشعارات ECHOX Store'}</span>
+                </span>
+                <button type="button" onClick={() => setIsNotificationsOpen(false)} className="text-slate-400 hover:text-[#0F172A] dark:hover:text-white cursor-pointer">
                   <X className="w-3.5 h-3.5" />
                 </button>
               </div>
-              <div className="space-y-2 text-xs">
+
+              {/* زر تفعيل إشعارات المتجر على الهاتف */}
+              <div className="mb-2.5 p-2.5 rounded-xl bg-[#FF6B00]/10 border border-[#FF6B00]/25 space-y-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-[11px] font-bold text-[#0F172A] dark:text-white flex items-center gap-1.5">
+                    <Smartphone className="w-3.5 h-3.5 text-[#FF6B00] shrink-0" />
+                    <span>تنبيهات العروض والمنتجات الجديدة</span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  disabled={pushBusy}
+                  onClick={handleToggleStorePush}
+                  className={`w-full py-1.5 px-3 rounded-lg text-[11px] font-black flex items-center justify-center gap-1.5 transition-colors cursor-pointer disabled:opacity-60 ${
+                    isPushEnabled
+                      ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                      : 'bg-[#FF6B00] hover:bg-[#E05E00] text-white'
+                  }`}
+                >
+                  {isPushEnabled ? (
+                    <>
+                      <BellOff className="w-3.5 h-3.5" />
+                      <span>إشعارات المتجر مفعّلة ✓ (إيقاف)</span>
+                    </>
+                  ) : (
+                    <>
+                      <BellRing className="w-3.5 h-3.5" />
+                      <span>{pushBusy ? 'جاري التفعيل...' : 'تفعيل إشعارات الموقع على الهاتف'}</span>
+                    </>
+                  )}
+                </button>
+                {pushFeedback && (
+                  <p className="text-[10px] font-bold text-slate-700 dark:text-slate-300 leading-relaxed">
+                    {pushFeedback}
+                  </p>
+                )}
+              </div>
+
+              <div className="space-y-2 text-xs max-h-60 overflow-y-auto">
+                {announcements.length > 0 && announcements.map((ann) => (
+                  <button
+                    key={ann.id}
+                    type="button"
+                    onClick={() => {
+                      if (ann.url && ann.url.includes('product=')) {
+                        try {
+                          const u = new URL(ann.url, window.location.origin);
+                          const pid = u.searchParams.get('product');
+                          if (pid) setSelectedProductId(pid);
+                        } catch {}
+                      }
+                      setIsNotificationsOpen(false);
+                    }}
+                    className="w-full text-start p-2 rounded-xl bg-[#F8FAFC] dark:bg-[#1E293B] border border-[#E2E8F0] dark:border-slate-800 hover:border-[#FF6B00]/50 transition-colors cursor-pointer"
+                  >
+                    <div className="flex items-center justify-between gap-1 text-[#FF6B00] font-bold text-[11px] mb-0.5">
+                      <span className="flex items-center gap-1">
+                        <Sparkles className="w-3 h-3 shrink-0" />
+                        <span>{ann.tag || 'تحديث المتجر'}</span>
+                      </span>
+                      <span className="text-[9px] text-slate-400 font-mono">
+                        {new Date(ann.createdAt).toLocaleDateString('ar-TN')}
+                      </span>
+                    </div>
+                    <p className="text-[11px] font-bold text-[#0F172A] dark:text-white leading-snug">{ann.title}</p>
+                    <p className="text-[10px] text-slate-600 dark:text-slate-400 mt-0.5 leading-snug">{ann.body}</p>
+                  </button>
+                ))}
+
                 <div className="p-2 rounded-xl bg-[#F8FAFC] dark:bg-[#1E293B] border border-[#E2E8F0] dark:border-slate-800">
                   <div className="flex items-center gap-1.5 text-[#FF6B00] font-bold text-[11px] mb-0.5">
                     <Sparkles className="w-3.5 h-3.5" />
@@ -290,6 +445,24 @@ export default function Header(_props: HeaderProps) {
                   <HeartHandshake className="w-4 h-4 shrink-0" />
                   <span>{t.supportEchox.navLabel}</span>
                 </button>
+
+                {canInstallPwa && (
+                  <div className="pt-2 space-y-2">
+                    <button
+                      type="button"
+                      onClick={handleInstallPwa}
+                      className="w-full text-start flex items-center gap-2 p-2.5 rounded-2xl bg-slate-900 dark:bg-slate-800 text-white hover:bg-slate-800 dark:hover:bg-slate-700 transition-colors cursor-pointer"
+                    >
+                      <Download className="w-4 h-4 text-[#FF6B00] shrink-0" />
+                      <span>تثبيت التطبيق على الهاتف (PWA)</span>
+                    </button>
+                    {showIosInstallTip && (
+                      <div className="p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 text-[11px] text-amber-800 dark:text-amber-300 leading-relaxed">
+                        على متصفح Safari: اضغط على أيقونة <strong>المشاركة (Share)</strong> بالأسفل ثم اختر <strong>إضافة إلى الشاشة الرئيسية (Add to Home Screen)</strong> لتثبيت التطبيق وتفعيل إشعارات الهاتف.
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
 
